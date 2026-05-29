@@ -8,7 +8,7 @@ import type { ChatMessage, Frame, Room } from "../types";
 
 type FeedItem = { kind: "msg"; m: ChatMessage } | { kind: "sys"; text: string };
 
-const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB cap for P2P transfer
+const MAX_FILE_BYTES = 25 * 1024 * 1024; // 25 MB cap for P2P transfer
 
 const AVATAR_COLORS = ["#5b7cfa", "#7c5cf0", "#2dd4a7", "#f59e0b", "#ec4899", "#06b6d4", "#8b5cf6", "#ef4444"];
 function avatarColor(name: string): string {
@@ -239,7 +239,7 @@ export default function Chat() {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
-    if (file.size > MAX_FILE_BYTES) { alert("File is too large — 10 MB max for peer-to-peer transfer."); return; }
+    if (file.size > MAX_FILE_BYTES) { alert("File is too large — 25 MB max for peer-to-peer transfer."); return; }
     if (wsRef.current?.readyState !== WebSocket.OPEN) return;
     const meta: MediaMeta = { id: crypto.randomUUID(), name: file.name, mime: file.type || "application/octet-stream", size: file.size };
     meshRef.current?.put(meta.id, file, meta);
@@ -253,6 +253,15 @@ export default function Chat() {
     if (url) {
       if (meta.mime.startsWith("image/"))
         return <a href={url} target="_blank" rel="noopener"><img className="media-img" src={url} alt={meta.name} /></a>;
+      if (meta.mime.startsWith("video/"))
+        return <video className="media-video" src={url} controls preload="metadata" />;
+      if (meta.mime.startsWith("audio/"))
+        return (
+          <div className="media-audio-wrap">
+            <div className="media-name">{meta.name}</div>
+            <audio className="media-audio" src={url} controls preload="metadata" />
+          </div>
+        );
       return (
         <a className="media-file" href={url} download={meta.name}>
           <Icon name="file" size={18} />
@@ -362,7 +371,7 @@ export default function Chat() {
 
       <form className="composer" onSubmit={send}>
         <div className="composer-inner">
-          <input ref={fileRef} type="file" hidden onChange={onPickFile} accept="image/*,application/pdf,.txt,.doc,.docx,.zip,audio/*" />
+          <input ref={fileRef} type="file" hidden onChange={onPickFile} accept="image/*,video/*,audio/*,application/pdf,.txt,.doc,.docx,.zip" />
           <button type="button" className="ghost icon-only" title="Share a file (peer-to-peer)" onClick={() => fileRef.current?.click()}>
             <Icon name="paperclip" size={18} />
           </button>
