@@ -19,11 +19,25 @@ class Settings(BaseSettings):
 
     database_url: str = f"sqlite:///{DEFAULT_DB.as_posix()}"
 
-    # How many recent messages to send a client when it joins a room.
-    history_limit: int = 50
+    # --- auth -------------------------------------------------------------
+    # SECURITY: override AUTH-style secret in production.
+    jwt_secret: str = "dev-only-insecure-secret-change-me"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 720  # 12 hours
 
-    # Maximum accepted length of a single chat message.
+    # --- chat -------------------------------------------------------------
+    history_limit: int = 50
     max_message_length: int = 2000
+
+    # --- rooms ------------------------------------------------------------
+    # Default lifetime for a new room, in hours (clients may pick others).
+    default_room_lifetime_hours: int = 24
+    # How often the background task purges expired rooms, in seconds.
+    cleanup_interval_seconds: int = 300
+
+    @property
+    def is_using_default_secret(self) -> bool:
+        return self.jwt_secret == "dev-only-insecure-secret-change-me"
 
 
 def get_settings() -> Settings:

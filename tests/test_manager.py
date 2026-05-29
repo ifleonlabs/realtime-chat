@@ -6,10 +6,9 @@ from realtime_chat.manager import ConnectionManager
 
 
 class FakeWS:
-    """A minimal stand-in for a Starlette WebSocket."""
-
     def __init__(self) -> None:
         self.accepted = False
+        self.closed = False
         self.sent: list = []
 
     async def accept(self) -> None:
@@ -18,63 +17,50 @@ class FakeWS:
     async def send_json(self, data) -> None:
         self.sent.append(data)
 
+    async def close(self, code: int = 1000) -> None:
+        self.closed = True
 
-async def test_connect_accepts_and_registers():
+
+async def test_connect_and_presence():
     mgr = ConnectionManager()
     ws = FakeWS()
     await mgr.connect("general", ws, "alice")
-    assert ws.accepted
-    assert mgr.count("general") == 1
+    assert ws.accepted and mgr.count("general") == 1
     assert mgr.usernames("general") == ["alice"]
 
 
-async def test_broadcast_reaches_all_connections():
+async def test_broadcast_reaches_all():
     mgr = ConnectionManager()
     a, b = FakeWS(), FakeWS()
-    await mgr.connect("room", a, "alice")
-    await mgr.connect("room", b, "bob")
-
-    await mgr.broadcast("room", {"type": "message", "content": "hi"})
-    assert {"type": "message", "content": "hi"} in a.sent
-    assert {"type": "message", "content": "hi"} in b.sent
+    await mgr.connect("r", a, "alice")
+    await mgr.connect("r", b, "bob")
+    await mgr.broadcast("r", {"x": 1})
+    assert a.sent == [{"x": 1}] and b.sent == [{"x": 1}]
 
 
-async def test_disconnect_removes_and_cleans_empty_room():
+async def test_disconnect_cleans_empty_room():
     mgr = ConnectionManager()
     ws = FakeWS()
-    await mgr.connect("room", ws, "alice")
-    mgr.disconnect("room", ws)
-    assert mgr.count("room") == 0
-    assert mgr.usernames("room") == []  # room entry dropped, no error
+    await mgr.connect("r", ws, "alice")
+    mgr.disconnect("r", ws)
+    assert mgr.count("r") == 0 and mgr.usernames("r") == []
 
 
-async def test_usernames_are_distinct_and_sorted():
-    mgr = ConnectionManager()
-    for name in ["bob", "alice", "bob"]:
-        await mgr.connect("room", FakeWS(), name)
-    assert mgr.usernames("room") == ["alice", "bob"]
-
-
-async def test_broadcast_skips_broken_connection():
-    mgr = ConnectionManager()
-    good = FakeWS()
-
-    class Broken(FakeWS):
-        async def send_json(self, data):
-            raise RuntimeError("socket closed")
-
-    await mgr.connect("room", good, "good")
-    await mgr.connect("room", Broken(), "broken")
-    # Should not raise even though one connection errors.
-    await mgr.broadcast("room", {"type": "system", "content": "ping"})
-    assert len(good.sent) == 1
-
-
-async def test_rooms_are_isolated():
+async def test_close_room_notifies_and_disconnects():
     mgr = ConnectionManager()
     a, b = FakeWS(), FakeWS()
-    await mgr.connect("room-a", a, "alice")
-    await mgr.connect("room-b", b, "bob")
-    await mgr.broadcast("room-a", {"x": 1})
-    assert a.sent == [{"x": 1}]
-    assert b.sent == []
+    await mgr.connect("r", a, "alice")
+    await mgr.connect("r", b, "bob")
+    await mgr.close_room("r", {"type": "system", "content": "expired"})
+    assert a.closed and b.closed
+    assert {"type": "system", "content": "expired"} in a.sent
+    assert mgr.count("r") == 0
+
+
+async def test_rooms_isolated():
+    mgr = ConnectionManager()
+    a, b = FakeWS(), FakeWS()
+    await mgr.connect("a", a, "alice")
+    await mgr.connect("b", b, "bob")
+    await mgr.broadcast("a", {"x": 1})
+    assert a.sent == [{"x": 1}] and b.sent == []

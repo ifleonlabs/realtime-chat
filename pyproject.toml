@@ -1,7 +1,7 @@
 [project]
 name = "realtime-chat"
-version = "0.1.0"
-description = "A real-time chat server with WebSocket rooms, presence, and persisted history."
+version = "0.2.0"
+description = "A full-stack chat app: accounts, user-created public/private rooms with auto-expiry, and real-time WebSocket messaging (FastAPI + React)."
 readme = "README.md"
 authors = [
     { name = "mahiprime2001", email = "tarunmatta5669@gmail.com" }
@@ -11,7 +11,11 @@ dependencies = [
     "sqlmodel>=0.0.21",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
+    "pydantic[email]>=2.7.0",
     "pydantic-settings>=2.3.0",
+    "pyjwt>=2.8.0",
+    "bcrypt>=4.1.0",
+    "python-multipart>=0.0.9",
     "typer>=0.12.0",
     "rich>=13.7.0",
 ]

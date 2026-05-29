@@ -1,4 +1,4 @@
-"""Shared fixtures: isolated temp database per test."""
+"""Shared fixtures: isolated temp database + fixed JWT secret per test."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from realtime_chat import db
 def temp_db(tmp_path, monkeypatch):
     db_path = (tmp_path / "test.db").as_posix()
     monkeypatch.setenv("CHAT_DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("CHAT_JWT_SECRET", "test-secret-that-is-at-least-32-bytes-long")
     db.reset_engine()
     db.init_db()
     yield
@@ -32,3 +33,18 @@ def client():
 
     with TestClient(app) as c:
         yield c
+
+
+def _register(client, username="alice", password="password123"):
+    res = client.post("/api/auth/register", json={"username": username, "password": password})
+    assert res.status_code == 201, res.text
+    return res.json()["access_token"]
+
+
+@pytest.fixture
+def auth(client):
+    """Return a helper that creates users and returns auth headers."""
+    def make(username="alice", password="password123"):
+        token = _register(client, username, password)
+        return {"Authorization": f"Bearer {token}"}
+    return make

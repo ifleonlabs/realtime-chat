@@ -1,89 +1,110 @@
 # realtime-chat
 
-A real-time chat server built on **WebSockets** with [FastAPI](https://fastapi.tiangolo.com/): multiple rooms, live presence ("who's online"), and message history persisted in SQLite via [SQLModel](https://sqlmodel.tiangolo.com/). Includes a browser frontend and a CLI. Managed with [uv](https://docs.astral.sh/uv/).
+A full-stack real-time chat app: **accounts**, **user-created rooms** (public or private), **auto-expiring rooms**, and live **WebSocket** messaging with presence. Built with a **FastAPI** backend ([SQLModel](https://sqlmodel.tiangolo.com/) + JWT auth) and a **React + TypeScript** frontend ([Vite](https://vitejs.dev/)).
 
-This is project #5 in a series of Python projects, progressing from basic to advanced.
+This is project #5 in a series of Python projects. **v0.2.0** grows the original WebSocket chat server into a complete product with auth, room management, and a real frontend.
 
-## What this project demonstrates
+## Features
 
-- **WebSockets** in FastAPI (`@app.websocket`) — a persistent, bidirectional connection instead of request/response
-- A **ConnectionManager** that tracks live connections per room and **broadcasts** to them
-- **Presence**: clients are told who's online as people join and leave
-- **Message history** persisted to a database and replayed when a client joins
-- A real-time browser frontend using the native **WebSocket API**
-- Tests covering the manager, persistence, and the **full WebSocket flow** (via Starlette's test client) — no real network needed
+- **Accounts** — register / log in; passwords hashed with bcrypt, sessions via JWT
+- **Rooms you create** — give them a name + description
+- **Public or private** — public rooms are listed for everyone; private rooms are hidden and require a **join code**
+- **Auto-expiry** — pick a room lifetime (1 hour / 24 hours / 7 days / never); a background task deletes expired rooms and disconnects their clients
+- **Real-time** — instant messaging over WebSockets, with **live presence** (who's online) and **history** replayed on join
+- **A polished React UI** plus a Typer CLI for administration
 
-## Install & run
+## What this version demonstrates
 
-Requires [uv](https://docs.astral.sh/uv/getting-started/installation/).
+- Combining **authentication** (JWT) with **WebSockets** — the socket is authorized via a token before it's accepted
+- **Authorization / data ownership** — room membership and owner-only actions
+- A **background task** (in the app lifespan) for scheduled cleanup
+- A real **frontend/backend split**: a Vite React SPA talking to a FastAPI JSON + WebSocket API
+- A backend test suite (32 tests) covering auth, rooms, access control, expiry, and the full WebSocket flow
+
+## Run it
+
+Requires [uv](https://docs.astral.sh/uv/) (backend) and [Node.js](https://nodejs.org/) (frontend).
+
+### Development (two terminals, hot-reload frontend)
 
 ```bash
-git clone https://github.com/ifleonlabs/realtime-chat.git
-cd realtime-chat
+# Terminal 1 — backend API + WebSocket on :8000
 uv sync
-uv run chat serve        # http://127.0.0.1:8000
+uv run chat serve
+
+# Terminal 2 — React dev server on :5173 (proxies /api and /ws to :8000)
+cd frontend
+npm install
+npm run dev
 ```
 
-Open <http://127.0.0.1:8000> in **two browser tabs**, pick different names and
-the same room, and watch messages appear instantly in both.
+Open <http://localhost:5173>, sign up, and create a room. Open a second browser
+(or an incognito window) as another user to chat in real time.
 
-## How it works
+### Production-style (one server)
 
-A connected client exchanges JSON frames over the socket:
-
-| `type` | Direction | Meaning |
-|--------|-----------|---------|
-| `history` | server → client | recent messages, sent right after joining |
-| `presence` | server → client | the current list of online users |
-| `system` | server → client | "X joined" / "X left" notices |
-| `message` | both ways | a chat message (client sends `{ "content": "..." }`) |
-
-WebSocket endpoint: `ws://HOST:PORT/ws/{room}?username=<name>`
-REST history (handy for clients/tests): `GET /api/rooms/{room}/messages`
-
-## CLI
+Build the frontend once; the backend then serves it at `/`:
 
 ```bash
-chat serve                 # run the web UI + WebSocket server
-chat rooms                 # list rooms with message counts
-chat history general -n 20 # print recent messages for a room
+cd frontend && npm install && npm run build && cd ..
+uv run chat serve          # http://127.0.0.1:8000 serves the built app + API
 ```
 
-## Configuration
+> Set `CHAT_JWT_SECRET` to a long random value (see `.env.example`) for anything
+> beyond local use. The server warns on startup if the insecure default is used.
 
-Copy `.env.example` to `.env` (all optional):
+## API overview
 
-| Variable | Default | Meaning |
-|----------|---------|---------|
-| `CHAT_DATABASE_URL` | `sqlite:///~/.realtime-chat/chat.db` | Any SQLAlchemy URL |
-| `CHAT_HISTORY_LIMIT` | `50` | Messages sent to a client on join |
-| `CHAT_MAX_MESSAGE_LENGTH` | `2000` | Max length of a single message |
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/api/auth/register` | create an account → returns a token |
+| `POST` | `/api/auth/login` | log in (OAuth2 form) → returns a token |
+| `GET`  | `/api/auth/me` | the current user |
+| `GET`  | `/api/rooms` | list public rooms |
+| `GET`  | `/api/rooms/mine` | rooms you own or have joined |
+| `POST` | `/api/rooms` | create a room (name, private?, lifetime) |
+| `POST` | `/api/rooms/{slug}/join` | join (with a code for private rooms) |
+| `DELETE` | `/api/rooms/{slug}` | delete a room (owner only) |
+| `WS`   | `/ws/{slug}?token=…` | the real-time channel (JWT required) |
 
-## Development
+Interactive API docs: <http://127.0.0.1:8000/docs>.
+
+## CLI (admin)
 
 ```bash
-uv sync                  # install runtime + dev dependencies
-uv run pytest            # run the test suite (17 tests)
+chat serve            # run the server
+chat users            # list registered users
+chat rooms            # list rooms (visibility, members, expiry)
+chat purge            # delete expired rooms now
 ```
 
 ## Project layout
 
 ```
 realtime-chat/
-├── pyproject.toml           # metadata, deps, entry points
-├── main.py                  # run the CLI without installing
-├── .env.example             # copy to .env to configure
-├── src/realtime_chat/
-│   ├── config.py            # pydantic-settings (.env / env vars)
-│   ├── db.py                # engine, session, init_db
-│   ├── models.py            # SQLModel Message table
-│   ├── manager.py           # ConnectionManager: rooms, broadcast, presence
-│   ├── service.py           # message persistence + history
-│   ├── cli.py               # Typer commands
-│   └── web/
-│       ├── app.py           # FastAPI: WebSocket endpoint + REST history
-│       └── static/          # chat frontend (index.html, style.css, app.js)
-└── tests/                   # manager, service, and WebSocket-flow tests
+├── pyproject.toml
+├── main.py                       # run the CLI without installing
+├── .env.example
+├── src/realtime_chat/            # FastAPI backend
+│   ├── config.py  db.py  models.py
+│   ├── security.py               # bcrypt + JWT
+│   ├── users.py  rooms.py  messages.py   # service layer
+│   ├── deps.py                   # auth dependencies (HTTP + WebSocket)
+│   ├── manager.py                # in-memory connection/broadcast layer
+│   ├── cleanup.py                # background expiry task
+│   ├── cli.py
+│   └── web/app.py                # API + WebSocket + serves the built SPA
+├── frontend/                     # Vite + React + TypeScript
+│   ├── src/api.ts  auth.tsx  App.tsx
+│   └── src/pages/ Login · Rooms · Chat
+└── tests/                        # services, API, WebSocket, manager
+```
+
+## Development
+
+```bash
+uv run pytest                 # backend tests (32)
+cd frontend && npm run build  # verify the frontend compiles
 ```
 
 ## License
