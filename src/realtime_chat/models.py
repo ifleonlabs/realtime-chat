@@ -50,3 +50,9 @@ class Message(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow)
     # When this message rolls off and is deleted (created_at + room TTL).
     expires_at: datetime = Field(default_factory=utcnow, index=True)
+    edited: bool = False
+    # Emoji reactions as a JSON object: {"👍": ["alice", "bob"], ...}
+    reactions: str = "{}"
+    # Denormalized preview of the message this one replies to (if any).
+    reply_to_username: Optional[str] = None
+    reply_to_excerpt: Optional[str] = None

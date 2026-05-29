@@ -32,18 +32,30 @@ export interface CreateRoomInput {
   ttl_minutes: number;
 }
 
+export interface ReplyInfo {
+  username: string;
+  excerpt: string;
+}
+
 export interface ChatMessage {
   type: "message";
+  id: number;
   username: string;
   content: string;
   created_at: string;
   expires_at: string;
+  edited: boolean;
+  reactions: Record<string, string[]>; // emoji -> usernames
+  reply: ReplyInfo | null;
 }
 
 export type Frame =
   | { type: "history"; messages: ChatMessage[] }
-  | { type: "message"; username: string; content: string; created_at: string; expires_at: string }
+  | ChatMessage
   | { type: "system"; content: string }
   | { type: "presence"; users: string[]; count: number }
   | { type: "typing"; username: string }
-  | { type: "rtc"; from: string; signal: unknown };
+  | { type: "rtc"; from: string; signal: unknown }
+  | { type: "reaction"; id: number; reactions: Record<string, string[]> }
+  | { type: "edited"; id: number; content: string }
+  | { type: "deleted"; id: number };

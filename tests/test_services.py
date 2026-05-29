@@ -103,6 +103,27 @@ def test_messages_recent_order_and_limit(session):
     assert [m.content for m in recent] == ["m2", "m3", "m4"]
 
 
+def test_reactions_toggle(session):
+    alice = _user(session)
+    room = rooms.create(session, alice, RoomCreate(name="r"))
+    m = messages.save(session, room.id, alice.id, "alice", "hi", 3600)
+    assert messages.toggle_reaction(session, m, "alice", "👍") == {"👍": ["alice"]}
+    assert messages.toggle_reaction(session, m, "bob", "👍") == {"👍": ["alice", "bob"]}
+    assert messages.toggle_reaction(session, m, "alice", "👍") == {"👍": ["bob"]}
+    assert messages.toggle_reaction(session, m, "bob", "👍") == {}
+
+
+def test_edit_and_reply_excerpt(session):
+    alice = _user(session)
+    room = rooms.create(session, alice, RoomCreate(name="r"))
+    m = messages.save(session, room.id, alice.id, "alice", "original", 3600)
+    messages.edit(session, m, "updated")
+    assert m.content == "updated" and m.edited is True
+    reply = messages.save(session, room.id, alice.id, "alice", "ok", 3600, reply_to=m)
+    p = messages.payload(reply)
+    assert p["reply"] == {"username": "alice", "excerpt": "updated"}
+
+
 def test_recent_excludes_expired_messages(session):
     alice = _user(session)
     room = rooms.create(session, alice, RoomCreate(name="r"))

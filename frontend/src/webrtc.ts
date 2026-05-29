@@ -14,6 +14,7 @@ export interface MediaMeta {
 
 type SendSignal = (target: string, signal: unknown) => void;
 type OnBlob = (id: string, blob: Blob, meta: MediaMeta) => void;
+type OnProgress = (id: string, received: number, total: number) => void;
 
 const ICE_CONFIG: RTCConfiguration = {
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
@@ -24,6 +25,7 @@ const BUFFER_LIMIT = 256 * 1024; // backpressure threshold
 interface Incoming {
   meta: MediaMeta;
   chunks: ArrayBuffer[];
+  received: number;
 }
 
 export class PeerMesh {
@@ -37,6 +39,7 @@ export class PeerMesh {
     private readonly self: string,
     private readonly sendSignal: SendSignal,
     private readonly onBlob: OnBlob,
+    private readonly onProgress?: OnProgress,
   ) {}
 
   // --- public API --------------------------------------------------------
@@ -144,7 +147,8 @@ export class PeerMesh {
       if (msg.t === "want") {
         void this.serve(ch, msg.id);
       } else if (msg.t === "head") {
-        this.incoming.set(other, { meta: msg.meta, chunks: [] });
+        this.incoming.set(other, { meta: msg.meta, chunks: [], received: 0 });
+        this.onProgress?.(msg.meta.id, 0, msg.meta.size);
       } else if (msg.t === "end") {
         const inc = this.incoming.get(other);
         this.incoming.delete(other);
@@ -156,7 +160,11 @@ export class PeerMesh {
       }
     } else if (data instanceof ArrayBuffer) {
       const inc = this.incoming.get(other);
-      if (inc) inc.chunks.push(data);
+      if (inc) {
+        inc.chunks.push(data);
+        inc.received += data.byteLength;
+        this.onProgress?.(inc.meta.id, inc.received, inc.meta.size);
+      }
     }
   }
 

@@ -1,8 +1,10 @@
-"""Message service: persistence, rolling expiry, and history retrieval."""
+"""Message service: persistence, rolling expiry, reactions, edits, replies."""
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from sqlmodel import Session, delete, select
 
@@ -14,7 +16,31 @@ def _aware(dt: datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-def save(session: Session, room_id: int, user_id: int, username: str, content: str, ttl_seconds: int) -> Message:
+def _excerpt(content: str) -> str:
+    """A short preview used when quoting a message in a reply."""
+    if content.startswith("{"):
+        try:
+            o = json.loads(content)
+            if o.get("_media"):
+                return f"📎 {o['_media'].get('name', 'file')}"
+        except json.JSONDecodeError:
+            pass
+    return content[:80]
+
+
+def get(session: Session, message_id: int) -> Optional[Message]:
+    return session.get(Message, message_id)
+
+
+def save(
+    session: Session,
+    room_id: int,
+    user_id: int,
+    username: str,
+    content: str,
+    ttl_seconds: int,
+    reply_to: Optional[Message] = None,
+) -> Message:
     now = datetime.now(timezone.utc)
     message = Message(
         room_id=room_id,
@@ -23,11 +49,45 @@ def save(session: Session, room_id: int, user_id: int, username: str, content: s
         content=content,
         created_at=now,
         expires_at=now + timedelta(seconds=ttl_seconds),
+        reply_to_username=reply_to.username if reply_to else None,
+        reply_to_excerpt=_excerpt(reply_to.content) if reply_to else None,
     )
     session.add(message)
     session.commit()
     session.refresh(message)
     return message
+
+
+def edit(session: Session, message: Message, content: str) -> Message:
+    message.content = content
+    message.edited = True
+    session.add(message)
+    session.commit()
+    session.refresh(message)
+    return message
+
+
+def remove(session: Session, message: Message) -> None:
+    session.delete(message)
+    session.commit()
+
+
+def toggle_reaction(session: Session, message: Message, username: str, emoji: str) -> dict:
+    """Add or remove ``username``'s ``emoji`` reaction; returns the new map."""
+    data: dict[str, list[str]] = json.loads(message.reactions or "{}")
+    users = set(data.get(emoji, []))
+    if username in users:
+        users.discard(username)
+    else:
+        users.add(username)
+    if users:
+        data[emoji] = sorted(users)
+    else:
+        data.pop(emoji, None)
+    message.reactions = json.dumps(data)
+    session.add(message)
+    session.commit()
+    return data
 
 
 def recent(session: Session, room_id: int, limit: int) -> list[Message]:
@@ -51,10 +111,17 @@ def purge_expired(session: Session, now: datetime | None = None) -> int:
 
 
 def payload(message: Message) -> dict:
+    reply = None
+    if message.reply_to_username is not None:
+        reply = {"username": message.reply_to_username, "excerpt": message.reply_to_excerpt or ""}
     return {
         "type": "message",
+        "id": message.id,
         "username": message.username,
         "content": message.content,
         "created_at": _aware(message.created_at).isoformat(),
         "expires_at": _aware(message.expires_at).isoformat(),
+        "edited": message.edited,
+        "reactions": json.loads(message.reactions or "{}"),
+        "reply": reply,
     }

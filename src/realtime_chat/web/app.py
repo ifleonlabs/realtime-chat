@@ -280,12 +280,52 @@ async def chat(websocket: WebSocket, slug: str, token: str = Query(None)) -> Non
                     )
                 continue
 
+            # Toggle an emoji reaction on a message.
+            if kind == "react":
+                mid, emoji = data.get("id"), str(data.get("emoji", ""))[:8]
+                if mid and emoji:
+                    with Session(get_engine()) as session:
+                        msg = messages.get(session, mid)
+                        if msg and msg.room_id == room_id:
+                            reactions = messages.toggle_reaction(session, msg, username, emoji)
+                            await manager.broadcast(slug, {"type": "reaction", "id": mid, "reactions": reactions})
+                continue
+
+            # Edit a message (own messages only).
+            if kind == "edit":
+                mid = data.get("id")
+                new = str(data.get("content", "")).strip()[: settings.max_message_length]
+                if mid and new:
+                    with Session(get_engine()) as session:
+                        msg = messages.get(session, mid)
+                        if msg and msg.room_id == room_id and msg.user_id == user_id:
+                            messages.edit(session, msg, new)
+                            await manager.broadcast(slug, {"type": "edited", "id": mid, "content": new})
+                continue
+
+            # Delete a message (own messages only).
+            if kind == "delete":
+                mid = data.get("id")
+                if mid:
+                    with Session(get_engine()) as session:
+                        msg = messages.get(session, mid)
+                        if msg and msg.room_id == room_id and msg.user_id == user_id:
+                            messages.remove(session, msg)
+                            await manager.broadcast(slug, {"type": "deleted", "id": mid})
+                continue
+
+            # A normal message, optionally replying to another.
             content = str(data.get("content", "")).strip()[: settings.max_message_length]
             if not content:
                 continue
+            reply_to_id = data.get("reply_to")
             with Session(get_engine()) as session:
-                message = messages.save(session, room_id, user_id, username, content, ttl_seconds)
-            await manager.broadcast(slug, messages.payload(message))
+                reply_to = messages.get(session, reply_to_id) if reply_to_id else None
+                if reply_to and reply_to.room_id != room_id:
+                    reply_to = None
+                message = messages.save(session, room_id, user_id, username, content, ttl_seconds, reply_to=reply_to)
+                payload = messages.payload(message)
+            await manager.broadcast(slug, payload)
     except WebSocketDisconnect:
         pass
     finally:

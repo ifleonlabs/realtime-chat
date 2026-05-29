@@ -88,6 +88,15 @@ def _migrate_sqlite(engine: Engine) -> None:
                     "UPDATE message SET expires_at = datetime(created_at, '+1 day') "
                     "WHERE expires_at IS NULL"
                 )
+            # Columns added for reactions / edit / reply features.
+            if "edited" not in message_cols:
+                conn.exec_driver_sql("ALTER TABLE message ADD COLUMN edited BOOLEAN NOT NULL DEFAULT 0")
+            if "reactions" not in message_cols:
+                conn.exec_driver_sql("ALTER TABLE message ADD COLUMN reactions TEXT NOT NULL DEFAULT '{}'")
+            if "reply_to_username" not in message_cols:
+                conn.exec_driver_sql("ALTER TABLE message ADD COLUMN reply_to_username TEXT")
+            if "reply_to_excerpt" not in message_cols:
+                conn.exec_driver_sql("ALTER TABLE message ADD COLUMN reply_to_excerpt TEXT")
 
 
 def get_session() -> Iterator[Session]:

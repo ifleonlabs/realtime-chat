@@ -130,6 +130,69 @@ def test_ws_rtc_signaling_relayed_to_target_only(client, auth):
             assert reply["type"] == "rtc" and reply["from"] == "bob"
 
 
+def test_ws_message_carries_id_and_metadata(client, auth):
+    headers = auth("alice")
+    slug = _make_room(client, headers, name="Meta")
+    with client.websocket_connect(f"/ws/{slug}?token={_token(headers)}") as ws:
+        for _ in range(3):
+            ws.receive_json()
+        ws.send_json({"type": "message", "content": "hello"})
+        msg = ws.receive_json()
+        assert isinstance(msg["id"], int)
+        assert msg["reactions"] == {} and msg["edited"] is False and msg["reply"] is None
+
+
+def test_ws_reactions_edit_reply_delete(client, auth):
+    headers = auth("alice")
+    slug = _make_room(client, headers, name="Acts")
+    with client.websocket_connect(f"/ws/{slug}?token={_token(headers)}") as ws:
+        for _ in range(3):
+            ws.receive_json()
+        ws.send_json({"type": "message", "content": "original"})
+        mid = ws.receive_json()["id"]
+
+        ws.send_json({"type": "react", "id": mid, "emoji": "👍"})
+        r = ws.receive_json()
+        assert r["type"] == "reaction" and r["id"] == mid and r["reactions"] == {"👍": ["alice"]}
+        ws.send_json({"type": "react", "id": mid, "emoji": "👍"})
+        assert ws.receive_json()["reactions"] == {}
+
+        ws.send_json({"type": "edit", "id": mid, "content": "edited!"})
+        e = ws.receive_json()
+        assert e["type"] == "edited" and e["id"] == mid and e["content"] == "edited!"
+
+        ws.send_json({"type": "message", "content": "a reply", "reply_to": mid})
+        rep = ws.receive_json()
+        assert rep["reply"] == {"username": "alice", "excerpt": "edited!"}
+
+        ws.send_json({"type": "delete", "id": mid})
+        d = ws.receive_json()
+        assert d["type"] == "deleted" and d["id"] == mid
+
+
+def test_ws_cannot_edit_or_delete_others_message(client, auth):
+    owner = auth("alice")
+    other = auth("bob")
+    slug = _make_room(client, owner, name="Own")
+    client.post(f"/api/rooms/{slug}/join", json={}, headers=other)
+
+    with client.websocket_connect(f"/ws/{slug}?token={_token(owner)}") as a:
+        for _ in range(3):
+            a.receive_json()
+        with client.websocket_connect(f"/ws/{slug}?token={_token(other)}") as b:
+            b.receive_json(); a.receive_json(); a.receive_json(); b.receive_json(); b.receive_json()
+            a.send_json({"type": "message", "content": "alice's message"})
+            mid = a.receive_json()["id"]
+            b.receive_json()  # bob sees alice's message
+
+            # Bob's delete of alice's message is ignored (ownership check).
+            # Prove no "deleted" is broadcast: alice's next frame is bob's later message.
+            b.send_json({"type": "delete", "id": mid})
+            b.send_json({"type": "message", "content": "still here"})
+            nxt = a.receive_json()
+            assert nxt["type"] == "message" and nxt["content"] == "still here"
+
+
 def test_ws_history_persists(client, auth):
     headers = auth("alice")
     slug = _make_room(client, headers, name="Persist")

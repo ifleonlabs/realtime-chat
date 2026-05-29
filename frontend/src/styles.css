@@ -267,6 +267,45 @@ select option { background: #12141c; }
 .media-loading, .media-missing { display: flex; align-items: center; gap: 0.5rem; padding: 0.45rem 0.6rem; font-size: 0.82rem; color: var(--muted); }
 .media-missing { color: var(--danger); }
 .spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--hairline-strong); border-top-color: var(--primary); animation: spin 0.8s linear infinite; display: inline-block; }
+.progress-track { display: inline-block; width: 120px; height: 6px; border-radius: 999px; background: var(--hairline); overflow: hidden; vertical-align: middle; margin-left: 0.4rem; }
+.progress-bar { display: block; height: 100%; background: var(--grad-primary); transition: width 0.2s var(--ease); }
+
+/* drag-to-share state */
+.messages.dropping { outline: 2px dashed var(--primary); outline-offset: -8px; background: rgba(91, 124, 250, 0.06); }
+
+/* message hover toolbar + actions */
+.bubble-stack { position: relative; }
+.msg-tools { position: absolute; top: -14px; display: none; gap: 2px; padding: 3px; z-index: 4;
+  background: var(--surface-2); border: 1px solid var(--hairline); border-radius: 10px; box-shadow: var(--shadow); }
+.msg-row:not(.me) .msg-tools { right: 0; }
+.msg-row.me .msg-tools { left: 0; }
+.msg-row:hover .msg-tools { display: flex; }
+.msg-tools button { background: transparent; border: none; padding: 0.2rem 0.35rem; border-radius: 7px; font-size: 0.85rem; line-height: 1; }
+.msg-tools button:hover { background: var(--glass-strong); transform: none; }
+.emoji-pop { position: absolute; top: 100%; margin-top: 4px; right: 0; display: flex; gap: 2px; padding: 3px;
+  background: var(--surface-2); border: 1px solid var(--hairline); border-radius: 10px; box-shadow: var(--shadow); }
+.emoji-pop button { background: transparent; border: none; padding: 0.2rem 0.3rem; font-size: 1.05rem; border-radius: 7px; }
+.emoji-pop button:hover { background: var(--glass-strong); transform: scale(1.15); }
+
+.reactions { display: flex; gap: 0.3rem; flex-wrap: wrap; margin: 0.25rem 0.2rem 0; }
+.msg-row.me .reactions { justify-content: flex-end; }
+.reaction { font-size: 0.72rem; padding: 0.1rem 0.45rem; border-radius: 999px; background: var(--glass);
+  border: 1px solid var(--hairline); color: var(--text-dim); font-weight: 600; cursor: pointer; }
+.reaction.mine { background: rgba(91, 124, 250, 0.18); border-color: var(--primary); color: var(--text); }
+
+.reply-quote { border-left: 3px solid var(--accent); padding: 0.1rem 0.5rem; margin-bottom: 0.3rem; opacity: 0.9; font-size: 0.8rem; }
+.reply-quote .reply-who { display: block; font-weight: 700; color: var(--accent); }
+.reply-quote .reply-text { color: var(--muted); }
+.msg-row.me .reply-quote .reply-text { color: rgba(255,255,255,0.8); }
+
+.edit-box { display: flex; gap: 0.35rem; align-items: center; }
+.edit-box input { padding: 0.35rem 0.5rem; min-width: 160px; }
+.edit-box button { padding: 0.35rem 0.6rem; }
+
+.reply-bar { display: flex; align-items: center; gap: 0.6rem; margin: 0 1rem; padding: 0.5rem 0.8rem;
+  background: var(--glass); border: 1px solid var(--hairline); border-radius: 10px 10px 0 0; font-size: 0.82rem; }
+.reply-bar .reply-who { color: var(--accent); font-weight: 700; white-space: nowrap; }
+.reply-bar .reply-bar-text { color: var(--muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .system { align-self: center; color: var(--muted); font-size: 0.76rem; margin: 0.5rem 0; padding: 0.18rem 0.7rem; background: var(--glass); border: 1px solid var(--hairline); border-radius: 999px; }
 
