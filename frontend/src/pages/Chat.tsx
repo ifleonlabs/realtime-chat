@@ -47,6 +47,11 @@ function parseMedia(content: string): MediaMeta | null {
     return null;
   }
 }
+function genId(): string {
+  // crypto.randomUUID is unavailable on non-secure origins (e.g. LAN IP over
+  // http), so fall back to a random string there.
+  try { return crypto.randomUUID(); } catch { return `id-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`; }
+}
 function previewOf(m: ChatMessage): string {
   const media = parseMedia(m.content);
   return media ? `📎 ${media.name}` : m.content.slice(0, 80);
@@ -92,7 +97,11 @@ export default function Chat() {
   const feedEndRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const lastTypingRef = useRef(0);
-  const requestedRef = useRef<Set<string>>(new Set());
+  const requestedRef = useRef<Map<string, number>>(new Map()); // media id -> first-requested ms
+  const feedRef = useRef<FeedItem[]>([]);
+  const urlsRef = useRef<Record<string, string>>({});
+  feedRef.current = feed;
+  urlsRef.current = mediaUrls;
 
   // --- access resolution -------------------------------------------------
   useEffect(() => {
@@ -175,17 +184,30 @@ export default function Chat() {
     return () => clearInterval(id);
   }, []);
 
+  // Pull missing media from peers. We RETRY on an interval because a data
+  // channel usually isn't open yet the instant a media message arrives — the
+  // WebRTC handshake takes a moment. Each tick re-asks any open peer until we
+  // have the blob, then gives up (marks "unavailable") after a timeout.
   useEffect(() => {
-    for (const it of feed) {
-      if (it.kind !== "msg") continue;
-      const meta = parseMedia(it.m.content);
-      if (!meta || mediaUrls[meta.id] || requestedRef.current.has(meta.id)) continue;
-      requestedRef.current.add(meta.id);
-      meshRef.current?.request(meta.id);
-      const mid = meta.id;
-      setTimeout(() => { if (!meshRef.current?.has(mid)) setMissing((u) => ({ ...u, [mid]: true })); }, 9000);
-    }
-  }, [feed, mediaUrls]);
+    const pending = requestedRef.current;
+    const iv = setInterval(() => {
+      const t = Date.now();
+      const liveMedia = new Set<string>();
+      for (const it of feedRef.current) {
+        if (it.kind !== "msg") continue;
+        const meta = parseMedia(it.m.content);
+        if (!meta) continue;
+        liveMedia.add(meta.id);
+        if (urlsRef.current[meta.id] || meshRef.current?.has(meta.id)) continue;
+        const first = pending.get(meta.id);
+        if (first === undefined) { pending.set(meta.id, t); }
+        else if (t - first > 20000) { setMissing((u) => (u[meta.id] ? u : { ...u, [meta.id]: true })); continue; }
+        meshRef.current?.request(meta.id);
+      }
+      for (const id of [...pending.keys()]) if (!liveMedia.has(id)) pending.delete(id);
+    }, 1500);
+    return () => clearInterval(iv);
+  }, []);
 
   useEffect(() => {
     const live = new Set<string>();
@@ -227,7 +249,7 @@ export default function Chat() {
   function shareFile(file: File) {
     if (file.size > MAX_FILE_BYTES) { alert("File is too large — 25 MB max for peer-to-peer transfer."); return; }
     if (wsRef.current?.readyState !== WebSocket.OPEN) return;
-    const meta: MediaMeta = { id: crypto.randomUUID(), name: file.name, mime: file.type || "application/octet-stream", size: file.size };
+    const meta: MediaMeta = { id: genId(), name: file.name, mime: file.type || "application/octet-stream", size: file.size };
     meshRef.current?.put(meta.id, file, meta);
     setMediaUrls((m) => ({ ...m, [meta.id]: URL.createObjectURL(file) }));
     wsSend({ type: "message", content: JSON.stringify({ _media: meta }), reply_to: replyTo?.id });
