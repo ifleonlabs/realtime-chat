@@ -45,4 +45,5 @@ export type Frame =
   | { type: "message"; username: string; content: string; created_at: string; expires_at: string }
   | { type: "system"; content: string }
   | { type: "presence"; users: string[]; count: number }
-  | { type: "typing"; username: string };
+  | { type: "typing"; username: string }
+  | { type: "rtc"; from: string; signal: unknown };

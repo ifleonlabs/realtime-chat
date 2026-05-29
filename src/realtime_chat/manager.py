@@ -54,6 +54,18 @@ class ConnectionManager:
             except Exception:
                 pass
 
+    async def send_to_user(self, room: str, username: str, payload: dict, exclude: WSLike | None = None) -> None:
+        """Send ``payload`` to a specific user's connection(s) in a room.
+
+        Used to relay WebRTC signaling, which is addressed to one peer.
+        """
+        for websocket, uname in list(self._rooms.get(room, {}).items()):
+            if uname == username and websocket is not exclude:
+                try:
+                    await websocket.send_json(payload)
+                except Exception:
+                    pass
+
     async def close_room(self, room: str, payload: dict | None = None) -> None:
         """Notify and disconnect everyone in a room (e.g. when it expires)."""
         connections = list(self._rooms.get(room, {}).keys())

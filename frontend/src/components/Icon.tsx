@@ -10,7 +10,10 @@ type IconName =
   | "hash"
   | "back"
   | "clock"
-  | "plus";
+  | "plus"
+  | "paperclip"
+  | "file"
+  | "download";
 
 const PATHS: Record<IconName, JSX.Element> = {
   message: <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />,
@@ -65,6 +68,22 @@ const PATHS: Record<IconName, JSX.Element> = {
     <>
       <path d="M5 12h14" />
       <path d="M12 5v14" />
+    </>
+  ),
+  paperclip: (
+    <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+  ),
+  file: (
+    <>
+      <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+      <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+    </>
+  ),
+  download: (
+    <>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" x2="12" y1="15" y2="3" />
     </>
   ),
 };

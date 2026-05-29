@@ -105,6 +105,31 @@ def test_ws_typing_relayed_to_others_not_sender(client, auth):
             assert b.receive_json()["content"] == "done typing"
 
 
+def test_ws_rtc_signaling_relayed_to_target_only(client, auth):
+    owner = auth("alice")
+    other = auth("bob")
+    slug = _make_room(client, owner, name="Open")
+    client.post(f"/api/rooms/{slug}/join", json={}, headers=other)
+
+    with client.websocket_connect(f"/ws/{slug}?token={_token(owner)}") as a:
+        for _ in range(3):
+            a.receive_json()
+        with client.websocket_connect(f"/ws/{slug}?token={_token(other)}") as b:
+            b.receive_json()      # history
+            a.receive_json()      # bob joined
+            a.receive_json()      # presence
+            b.receive_json()      # bob's own system
+            b.receive_json()      # bob's own presence
+
+            a.send_json({"type": "rtc", "target": "bob", "signal": {"sdp": "offer-xyz"}})
+            frame = b.receive_json()
+            assert frame == {"type": "rtc", "from": "alice", "signal": {"sdp": "offer-xyz"}}
+
+            b.send_json({"type": "rtc", "target": "alice", "signal": {"sdp": "answer-xyz"}})
+            reply = a.receive_json()
+            assert reply["type"] == "rtc" and reply["from"] == "bob"
+
+
 def test_ws_history_persists(client, auth):
     headers = auth("alice")
     slug = _make_room(client, headers, name="Persist")

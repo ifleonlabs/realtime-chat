@@ -268,6 +268,18 @@ async def chat(websocket: WebSocket, slug: str, token: str = Query(None)) -> Non
                 )
                 continue
 
+            # WebRTC signaling: relay the handshake to one target peer only.
+            # The actual files travel peer-to-peer and never reach the server.
+            if kind == "rtc":
+                target = data.get("target")
+                signal = data.get("signal")
+                if target and signal is not None:
+                    await manager.send_to_user(
+                        slug, target, {"type": "rtc", "from": username, "signal": signal},
+                        exclude=websocket,
+                    )
+                continue
+
             content = str(data.get("content", "")).strip()[: settings.max_message_length]
             if not content:
                 continue

@@ -1,11 +1,14 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, ApiError, tokenStore } from "../api";
 import { useAuth } from "../auth";
 import { Icon } from "../components/Icon";
+import { PeerMesh, type MediaMeta } from "../webrtc";
 import type { ChatMessage, Frame, Room } from "../types";
 
 type FeedItem = { kind: "msg"; m: ChatMessage } | { kind: "sys"; text: string };
+
+const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB cap for P2P transfer
 
 const AVATAR_COLORS = ["#5b7cfa", "#7c5cf0", "#2dd4a7", "#f59e0b", "#ec4899", "#06b6d4", "#8b5cf6", "#ef4444"];
 function avatarColor(name: string): string {
@@ -28,6 +31,22 @@ const ttlLabel = (seconds: number) => {
   return mins % 60 === 0 ? `${mins / 60}h` : `${mins}m`;
 };
 const timeOf = (iso: string) => new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+function fmtSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+// Media messages are ordinary chat messages whose content is a JSON envelope.
+function parseMedia(content: string): MediaMeta | null {
+  if (!content.startsWith("{")) return null;
+  try {
+    const o = JSON.parse(content);
+    return o && o._media ? (o._media as MediaMeta) : null;
+  } catch {
+    return null;
+  }
+}
 
 function dayLabel(iso: string): string {
   const d = new Date(iso);
@@ -39,8 +58,6 @@ function dayLabel(iso: string): string {
   return d.toLocaleDateString(undefined, { month: "long", day: "numeric" });
 }
 
-// Render rows: insert date dividers and mark consecutive messages from the
-// same author (within 5 min) as "grouped" so the avatar/name show only once.
 type Row =
   | { kind: "divider"; label: string }
   | { kind: "sys"; text: string }
@@ -57,11 +74,7 @@ function buildRows(feed: FeedItem[]): Row[] {
       continue;
     }
     const day = dayLabel(item.m.created_at);
-    if (day !== lastDay) {
-      out.push({ kind: "divider", label: day });
-      lastDay = day;
-      prev = null;
-    }
+    if (day !== lastDay) { out.push({ kind: "divider", label: day }); lastDay = day; prev = null; }
     const t = new Date(item.m.created_at).getTime();
     const grouped = !!prev && prev.user === item.m.username && t - prev.t < 5 * 60 * 1000;
     out.push({ kind: "msg", m: item.m, grouped });
@@ -84,11 +97,16 @@ export default function Chat() {
   const [users, setUsers] = useState<string[]>([]);
   const [connected, setConnected] = useState(false);
   const [now, setNow] = useState(Date.now());
-  const [typing, setTyping] = useState<Record<string, number>>({}); // username -> expiry ms
+  const [typing, setTyping] = useState<Record<string, number>>({});
+  const [mediaUrls, setMediaUrls] = useState<Record<string, string>>({}); // id -> object URL
+  const [missing, setMissing] = useState<Record<string, boolean>>({}); // id -> unavailable
 
   const wsRef = useRef<WebSocket | null>(null);
+  const meshRef = useRef<PeerMesh | null>(null);
   const feedEndRef = useRef<HTMLDivElement | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
   const lastTypingRef = useRef(0);
+  const requestedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     let cancelled = false;
@@ -110,19 +128,30 @@ export default function Chat() {
     setErrMsg("");
     try {
       const r = await api.joinRoom(slug, code.trim());
-      setRoom(r);
-      setPhase("ready");
+      setRoom(r); setPhase("ready");
     } catch (err) {
       setErrMsg(err instanceof ApiError ? err.message : "Could not join this room.");
     }
   }
 
+  // WebSocket + WebRTC peer mesh.
   useEffect(() => {
-    if (phase !== "ready" || !room) return;
+    if (phase !== "ready" || !room || !user) return;
     const token = tokenStore.get();
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const ws = new WebSocket(`${proto}://${location.host}/ws/${room.slug}?token=${token}`);
     wsRef.current = ws;
+
+    const mesh = new PeerMesh(
+      user.username,
+      (target, signal) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "rtc", target, signal })); },
+      (id, blob) => {
+        const url = URL.createObjectURL(blob);
+        setMediaUrls((m) => (m[id] ? (URL.revokeObjectURL(url), m) : { ...m, [id]: url }));
+      },
+    );
+    meshRef.current = mesh;
+
     ws.onopen = () => setConnected(true);
     ws.onclose = () => setConnected(false);
     ws.onmessage = (ev) => {
@@ -130,33 +159,60 @@ export default function Chat() {
       if (frame.type === "history") setFeed(frame.messages.map((m) => ({ kind: "msg", m })));
       else if (frame.type === "message") {
         setFeed((f) => [...f, { kind: "msg", m: frame }]);
-        // A message means they stopped typing — clear it immediately.
-        setTyping((t) => { const { [frame.username]: _drop, ...rest } = t; return rest; });
+        setTyping((t) => { const { [frame.username]: _d, ...rest } = t; return rest; });
       } else if (frame.type === "system") setFeed((f) => [...f, { kind: "sys", text: frame.content }]);
-      else if (frame.type === "presence") setUsers(frame.users);
+      else if (frame.type === "presence") { setUsers(frame.users); mesh.setPeers(frame.users); }
       else if (frame.type === "typing") setTyping((t) => ({ ...t, [frame.username]: Date.now() + 4000 }));
+      else if (frame.type === "rtc") void mesh.handleSignal(frame.from, frame.signal);
     };
-    return () => ws.close();
-  }, [phase, room?.slug]);
+    return () => { ws.close(); mesh.close(); meshRef.current = null; };
+  }, [phase, room?.slug, user?.username]);
 
-  // Tick: advance clock and drop messages that have rolled off (oldest first).
+  // Tick: clock, message expiry, typing expiry.
   useEffect(() => {
     const id = setInterval(() => {
       const t = Date.now();
       setNow(t);
       setFeed((f) => f.filter((it) => it.kind !== "msg" || new Date(it.m.expires_at).getTime() > t));
-      // Expire stale typing indicators (no ping in the last 4s).
       setTyping((tm) => {
-        const next: Record<string, number> = {};
-        let changed = false;
-        for (const [u, exp] of Object.entries(tm)) {
-          if (exp > t) next[u] = exp; else changed = true;
-        }
+        const next: Record<string, number> = {}; let changed = false;
+        for (const [u, exp] of Object.entries(tm)) { if (exp > t) next[u] = exp; else changed = true; }
         return changed ? next : tm;
       });
     }, 1000);
     return () => clearInterval(id);
   }, []);
+
+  // Request media blobs we don't have yet from peers; mark unavailable if none answer.
+  useEffect(() => {
+    for (const it of feed) {
+      if (it.kind !== "msg") continue;
+      const meta = parseMedia(it.m.content);
+      if (!meta || mediaUrls[meta.id] || requestedRef.current.has(meta.id)) continue;
+      requestedRef.current.add(meta.id);
+      meshRef.current?.request(meta.id);
+      const mid = meta.id;
+      setTimeout(() => { if (!meshRef.current?.has(mid)) setMissing((u) => ({ ...u, [mid]: true })); }, 9000);
+    }
+  }, [feed, mediaUrls]);
+
+  // Revoke object URLs and drop blobs when their message has rolled off.
+  useEffect(() => {
+    const live = new Set<string>();
+    for (const it of feed) {
+      if (it.kind === "msg") { const m = parseMedia(it.m.content); if (m) live.add(m.id); }
+    }
+    setMediaUrls((m) => {
+      let changed = false; const next = { ...m };
+      for (const id of Object.keys(m)) {
+        if (!live.has(id)) {
+          URL.revokeObjectURL(m[id]); delete next[id];
+          meshRef.current?.drop(id); requestedRef.current.delete(id); changed = true;
+        }
+      }
+      return changed ? next : m;
+    });
+  }, [feed]);
 
   useEffect(() => { feedEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [feed]);
 
@@ -169,13 +225,46 @@ export default function Chat() {
     input.value = "";
   }
 
-  // Send a typing ping at most every ~1.8s while the user is actually typing.
   function onType() {
     const t = Date.now();
     if (wsRef.current?.readyState === WebSocket.OPEN && t - lastTypingRef.current > 1800) {
       lastTypingRef.current = t;
       wsRef.current.send(JSON.stringify({ type: "typing" }));
     }
+  }
+
+  // Share a file: cache it locally + in the mesh, render immediately, and send
+  // a media message (metadata only). The bytes are pulled peer-to-peer.
+  function onPickFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (file.size > MAX_FILE_BYTES) { alert("File is too large — 10 MB max for peer-to-peer transfer."); return; }
+    if (wsRef.current?.readyState !== WebSocket.OPEN) return;
+    const meta: MediaMeta = { id: crypto.randomUUID(), name: file.name, mime: file.type || "application/octet-stream", size: file.size };
+    meshRef.current?.put(meta.id, file, meta);
+    const url = URL.createObjectURL(file);
+    setMediaUrls((m) => ({ ...m, [meta.id]: url }));
+    wsRef.current.send(JSON.stringify({ type: "message", content: JSON.stringify({ _media: meta }) }));
+  }
+
+  function renderMedia(meta: MediaMeta) {
+    const url = mediaUrls[meta.id];
+    if (url) {
+      if (meta.mime.startsWith("image/"))
+        return <a href={url} target="_blank" rel="noopener"><img className="media-img" src={url} alt={meta.name} /></a>;
+      return (
+        <a className="media-file" href={url} download={meta.name}>
+          <Icon name="file" size={18} />
+          <span className="media-name">{meta.name}</span>
+          <span className="media-size">{fmtSize(meta.size)}</span>
+          <Icon name="download" size={16} />
+        </a>
+      );
+    }
+    if (missing[meta.id])
+      return <div className="media-missing"><Icon name="file" size={16} /> {meta.name} — no longer available (no online source)</div>;
+    return <div className="media-loading"><span className="spinner" /> Receiving {meta.name}…</div>;
   }
 
   if (phase === "loading")
@@ -204,8 +293,7 @@ export default function Chat() {
   const typingText =
     typingNames.length === 1 ? `${typingNames[0]} is typing`
     : typingNames.length === 2 ? `${typingNames[0]} and ${typingNames[1]} are typing`
-    : typingNames.length > 2 ? "Several people are typing"
-    : "";
+    : typingNames.length > 2 ? "Several people are typing" : "";
 
   return (
     <div className="chat-page">
@@ -241,18 +329,13 @@ export default function Chat() {
             if (row.kind === "divider") return <div className="date-divider" key={i}>{row.label}</div>;
             if (row.kind === "sys") return <div className="system" key={i}>{row.text}</div>;
             const mine = row.m.username === user?.username;
+            const media = parseMedia(row.m.content);
             return (
               <div className={`msg-row ${mine ? "me" : ""} ${row.grouped ? "grouped" : "start"}`} key={i}>
-                {row.grouped ? (
-                  <div className="avatar placeholder" />
-                ) : (
-                  <div className="avatar" style={{ background: avatarColor(row.m.username) }}>{initials(row.m.username)}</div>
-                )}
+                {row.grouped ? <div className="avatar placeholder" /> : <div className="avatar" style={{ background: avatarColor(row.m.username) }}>{initials(row.m.username)}</div>}
                 <div className="bubble-wrap">
-                  {!row.grouped && (
-                    <div className="who">{row.m.username}<span className="time">{timeOf(row.m.created_at)}</span></div>
-                  )}
-                  <div className="bubble">{row.m.content}</div>
+                  {!row.grouped && <div className="who">{row.m.username}<span className="time">{timeOf(row.m.created_at)}</span></div>}
+                  <div className={"bubble" + (media ? " media" : "")}>{media ? renderMedia(media) : row.m.content}</div>
                 </div>
               </div>
             );
@@ -274,16 +357,15 @@ export default function Chat() {
       </div>
 
       <div className="typing-row">
-        {typingText && (
-          <span className="typing-indicator">
-            {typingText}
-            <span className="dots"><i /><i /><i /></span>
-          </span>
-        )}
+        {typingText && <span className="typing-indicator">{typingText}<span className="dots"><i /><i /><i /></span></span>}
       </div>
 
       <form className="composer" onSubmit={send}>
         <div className="composer-inner">
+          <input ref={fileRef} type="file" hidden onChange={onPickFile} accept="image/*,application/pdf,.txt,.doc,.docx,.zip,audio/*" />
+          <button type="button" className="ghost icon-only" title="Share a file (peer-to-peer)" onClick={() => fileRef.current?.click()}>
+            <Icon name="paperclip" size={18} />
+          </button>
           <input name="msg" placeholder="Type a message…" autoComplete="off" autoFocus aria-label="Message" onChange={onType} />
           <button className="primary send-btn" type="submit" aria-label="Send"><Icon name="send" size={18} /></button>
         </div>
