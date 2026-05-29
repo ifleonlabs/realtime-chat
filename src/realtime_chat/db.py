@@ -28,10 +28,44 @@ def get_engine() -> Engine:
 
 
 def init_db() -> None:
-    """Create all tables. Safe to call repeatedly."""
+    """Create all tables, then run lightweight column migrations. Idempotent."""
     from . import models  # noqa: F401  (registers tables on the metadata)
 
-    SQLModel.metadata.create_all(get_engine())
+    engine = get_engine()
+    SQLModel.metadata.create_all(engine)
+    _migrate_sqlite(engine)
+
+
+def _migrate_sqlite(engine: Engine) -> None:
+    """Add columns introduced in newer versions to a pre-existing SQLite DB.
+
+    ``create_all`` never alters existing tables, so a database created by an
+    earlier version is missing the newer columns. We add them in place (keeping
+    existing rows) rather than forcing the user to delete their database.
+    """
+    if engine.dialect.name != "sqlite":
+        return
+
+    def columns(conn, table: str) -> set[str]:
+        rows = conn.exec_driver_sql(f"PRAGMA table_info({table})").fetchall()
+        return {row[1] for row in rows}
+
+    with engine.begin() as conn:
+        room_cols = columns(conn, "room")
+        # A non-empty set without the new column means an old schema.
+        if room_cols and "message_ttl_seconds" not in room_cols:
+            conn.exec_driver_sql(
+                "ALTER TABLE room ADD COLUMN message_ttl_seconds INTEGER NOT NULL DEFAULT 86400"
+            )
+
+        message_cols = columns(conn, "message")
+        if message_cols and "expires_at" not in message_cols:
+            conn.exec_driver_sql("ALTER TABLE message ADD COLUMN expires_at DATETIME")
+            # Backfill: keep old messages for 24h from when they were sent.
+            conn.exec_driver_sql(
+                "UPDATE message SET expires_at = datetime(created_at, '+1 day') "
+                "WHERE expires_at IS NULL"
+            )
 
 
 def get_session() -> Iterator[Session]:
