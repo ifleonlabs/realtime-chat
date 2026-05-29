@@ -7,12 +7,9 @@ import type { Room } from "../types";
 
 function ttlLabel(room: Room): string {
   const mins = Math.round(room.message_ttl_seconds / 60);
-  if (mins % 60 === 0) return `messages last ${mins / 60}h`;
-  return `messages last ${mins}m`;
+  return mins % 60 === 0 ? `${mins / 60}h lifetime` : `${mins}m lifetime`;
 }
 
-// Preset message lifetimes (minutes). 24h is the hard maximum; "Custom" lets
-// the user enter any value up to 24h.
 const TTL_PRESETS = [
   { label: "1 hour", minutes: 60 },
   { label: "6 hours", minutes: 360 },
@@ -21,6 +18,41 @@ const TTL_PRESETS = [
 ];
 const MAX_MINUTES = 1440;
 
+function RoomCard({
+  room,
+  onOpen,
+  onDelete,
+}: {
+  room: Room;
+  onOpen: () => void;
+  onDelete?: () => void;
+}) {
+  return (
+    <div className="card room">
+      <div className={"room-icon" + (room.is_private ? " private" : "")}>
+        <Icon name={room.is_private ? "lock" : "hash"} size={18} />
+      </div>
+      <div className="room-main">
+        <div className="room-name">{room.name}</div>
+        {room.description && <div className="room-desc">{room.description}</div>}
+        <div className="room-meta">
+          {room.is_owner && <span className="chip owner">owner</span>}
+          <span className="chip">by @{room.owner_username}</span>
+          <span className="chip">{room.member_count} member{room.member_count === 1 ? "" : "s"}</span>
+          <span className="chip"><Icon name="clock" /> {ttlLabel(room)}</span>
+        </div>
+        {room.join_code && <div className="code">Code: <code>{room.join_code}</code></div>}
+      </div>
+      <div className="room-actions">
+        <button className="primary" onClick={onOpen}>{room.is_member ? "Open" : "Join"}</button>
+        {onDelete && (
+          <button className="ghost danger icon-only" title="Delete room" onClick={onDelete}><Icon name="trash" size={16} /></button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Rooms() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -28,11 +60,10 @@ export default function Rooms() {
   const [myRooms, setMyRooms] = useState<Room[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  // create-room form state
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [isPrivate, setIsPrivate] = useState(false);
-  const [preset, setPreset] = useState<string>("1440"); // minutes, or "custom"
+  const [preset, setPreset] = useState<string>("1440");
   const [customHours, setCustomHours] = useState("2");
 
   async function refresh() {
@@ -44,10 +75,7 @@ export default function Rooms() {
       setError(err instanceof ApiError ? err.message : "Failed to load rooms.");
     }
   }
-
-  useEffect(() => {
-    refresh();
-  }, []);
+  useEffect(() => { refresh(); }, []);
 
   function chosenTtlMinutes(): number {
     if (preset === "custom") {
@@ -62,13 +90,10 @@ export default function Rooms() {
     setError(null);
     try {
       const room = await api.createRoom({
-        name: name.trim(),
-        description: description.trim(),
-        is_private: isPrivate,
-        ttl_minutes: chosenTtlMinutes(),
+        name: name.trim(), description: description.trim(),
+        is_private: isPrivate, ttl_minutes: chosenTtlMinutes(),
       });
-      setName("");
-      setDescription("");
+      setName(""); setDescription("");
       navigate(`/room/${room.slug}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to create room.");
@@ -95,10 +120,11 @@ export default function Rooms() {
 
   return (
     <div className="page">
-      <header className="topbar">
-        <span className="brand-sm"><Icon name="message" size={22} /> realtime-chat</span>
+      <header className="topbar glassbar">
+        <span className="logo sm"><Icon name="message" size={18} /></span>
+        <span className="brand-sm">realtime-chat</span>
         <span className="spacer" />
-        <span className="muted">@{user?.username}</span>
+        <span className="user-chip">@{user?.username}</span>
         <button className="ghost" onClick={logout}><Icon name="logout" size={16} /> Log out</button>
       </header>
 
@@ -112,80 +138,50 @@ export default function Rooms() {
             <label className="field-label">Messages disappear after</label>
             <div className="form-row">
               <select value={preset} onChange={(e) => setPreset(e.target.value)}>
-                {TTL_PRESETS.map((p) => (
-                  <option key={p.minutes} value={String(p.minutes)}>{p.label}</option>
-                ))}
+                {TTL_PRESETS.map((p) => <option key={p.minutes} value={String(p.minutes)}>{p.label}</option>)}
                 <option value="custom">Custom…</option>
               </select>
               {preset === "custom" && (
-                <input
-                  type="number" min={0.1} max={24} step={0.5}
-                  value={customHours}
-                  onChange={(e) => setCustomHours(e.target.value)}
-                  placeholder="hours (max 24)"
-                  title="Hours, up to 24"
-                />
+                <input type="number" min={0.1} max={24} step={0.5} value={customHours}
+                  onChange={(e) => setCustomHours(e.target.value)} placeholder="hours (max 24)" title="Hours, up to 24" />
               )}
             </div>
 
             <label className="check">
               <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} />
-              Private (join by code)
+              Private — only people with the join code can enter
             </label>
 
             <button className="primary" type="submit"><Icon name="plus" size={16} /> Create &amp; open</button>
+            {error && <p className="error">{error}</p>}
           </form>
+        </section>
 
-          {error && <p className="error">{error}</p>}
-
+        <section>
           {myRooms.length > 0 && (
             <>
               <h3 className="section-title">Your rooms</h3>
               <div className="room-list">
                 {myRooms.map((room) => (
-                  <div className="card room" key={room.slug}>
-                    <div className="room-main">
-                      <div className="room-name">
-                        <Icon name={room.is_private ? "lock" : "hash"} size={16} />{room.name}
-                        {room.is_owner && <span className="tag">owner</span>}
-                      </div>
-                      <div className="room-meta">
-                        {room.member_count} member{room.member_count === 1 ? "" : "s"} · {ttlLabel(room)}
-                      </div>
-                      {room.join_code && (
-                        <div className="code">code: <code>{room.join_code}</code></div>
-                      )}
-                    </div>
-                    <div className="room-actions">
-                      <button className="primary" onClick={() => navigate(`/room/${room.slug}`)}>Open</button>
-                      {room.is_owner && <button className="ghost danger icon-only" title="Delete room" onClick={() => remove(room)}><Icon name="trash" size={16} /></button>}
-                    </div>
-                  </div>
+                  <RoomCard key={room.slug} room={room}
+                    onOpen={() => navigate(`/room/${room.slug}`)}
+                    onDelete={room.is_owner ? () => remove(room) : undefined} />
                 ))}
               </div>
             </>
           )}
-        </section>
 
-        <section>
-          <h3 className="section-title">Public rooms</h3>
+          <h3 className="section-title">Discover public rooms</h3>
           {browseable.length === 0 ? (
-            <p className="muted">No public rooms to join right now. Create one!</p>
+            <div className="card empty-card">
+              <span className="logo"><Icon name="hash" size={18} /></span>
+              <div>No public rooms to join right now.</div>
+              <div className="muted" style={{ fontSize: "0.85rem", marginTop: "0.3rem" }}>Create one on the left to get started.</div>
+            </div>
           ) : (
             <div className="room-list">
               {browseable.map((room) => (
-                <div className="card room" key={room.slug}>
-                  <div className="room-main">
-                    <div className="room-name"><Icon name="hash" size={16} />{room.name}</div>
-                    {room.description && <div className="room-desc">{room.description}</div>}
-                    <div className="room-meta">
-                      by @{room.owner_username} · {room.member_count} member{room.member_count === 1 ? "" : "s"} · {ttlLabel(room)}
-                    </div>
-                  </div>
-                  <div className="room-actions">
-                    <button className="primary" onClick={() => open(room)}>Join</button>
-                  </div>
-                </div>
+                <RoomCard key={room.slug} room={room} onOpen={() => open(room)} />
               ))}
             </div>
           )}

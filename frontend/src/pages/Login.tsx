@@ -26,10 +26,13 @@ export default function Login() {
   }
 
   return (
-    <div className="center">
+    <div className="auth-shell">
       <form className="card auth-card" onSubmit={submit}>
-        <h1 className="brand"><Icon name="message" size={26} /> realtime-chat</h1>
-        <p className="subtitle">Sign in to create rooms and chat in real time</p>
+        <div className="auth-head">
+          <span className="logo"><Icon name="message" size={20} /></span>
+          <h1 className="brand" style={{ fontSize: "1.45rem" }}>realtime-chat</h1>
+        </div>
+        <p className="subtitle">Ephemeral rooms, real-time messages. Sign in to start.</p>
         <div className="tabs">
           <button type="button" className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>
             Log in
