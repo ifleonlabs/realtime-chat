@@ -40,9 +40,15 @@ class ConnectionManager:
     def count(self, room: str) -> int:
         return len(self._rooms.get(room, {}))
 
-    async def broadcast(self, room: str, payload: dict) -> None:
-        """Send ``payload`` (as JSON) to every connection in ``room``."""
+    async def broadcast(self, room: str, payload: dict, exclude: WSLike | None = None) -> None:
+        """Send ``payload`` (as JSON) to connections in ``room``.
+
+        Pass ``exclude`` to skip one connection (e.g. don't echo a sender's own
+        typing indicator back to them).
+        """
         for websocket in list(self._rooms.get(room, {}).keys()):
+            if websocket is exclude:
+                continue
             try:
                 await websocket.send_json(payload)
             except Exception:

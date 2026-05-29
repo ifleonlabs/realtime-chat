@@ -78,6 +78,33 @@ def test_ws_broadcast_between_members(client, auth):
             assert received["username"] == "bob" and received["content"] == "hi alice"
 
 
+def test_ws_typing_relayed_to_others_not_sender(client, auth):
+    owner = auth("alice")
+    other = auth("bob")
+    slug = _make_room(client, owner, name="Open")
+    client.post(f"/api/rooms/{slug}/join", json={}, headers=other)
+
+    with client.websocket_connect(f"/ws/{slug}?token={_token(owner)}") as a:
+        for _ in range(3):
+            a.receive_json()
+        with client.websocket_connect(f"/ws/{slug}?token={_token(other)}") as b:
+            b.receive_json()      # history
+            a.receive_json()      # system: bob joined
+            a.receive_json()      # presence
+            b.receive_json()      # bob's own system
+            b.receive_json()      # bob's own presence
+
+            # Bob types -> Alice sees a typing frame for bob; Bob does not.
+            b.send_json({"type": "typing"})
+            frame = a.receive_json()
+            assert frame == {"type": "typing", "username": "bob"}
+
+            # Confirm it isn't echoed to the sender: bob's next frame is a real
+            # message (typing was not delivered back to bob).
+            b.send_json({"type": "message", "content": "done typing"})
+            assert b.receive_json()["content"] == "done typing"
+
+
 def test_ws_history_persists(client, auth):
     headers = auth("alice")
     slug = _make_room(client, headers, name="Persist")

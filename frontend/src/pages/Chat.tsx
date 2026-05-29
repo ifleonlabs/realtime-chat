@@ -84,9 +84,11 @@ export default function Chat() {
   const [users, setUsers] = useState<string[]>([]);
   const [connected, setConnected] = useState(false);
   const [now, setNow] = useState(Date.now());
+  const [typing, setTyping] = useState<Record<string, number>>({}); // username -> expiry ms
 
   const wsRef = useRef<WebSocket | null>(null);
   const feedEndRef = useRef<HTMLDivElement | null>(null);
+  const lastTypingRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -126,9 +128,13 @@ export default function Chat() {
     ws.onmessage = (ev) => {
       const frame: Frame = JSON.parse(ev.data);
       if (frame.type === "history") setFeed(frame.messages.map((m) => ({ kind: "msg", m })));
-      else if (frame.type === "message") setFeed((f) => [...f, { kind: "msg", m: frame }]);
-      else if (frame.type === "system") setFeed((f) => [...f, { kind: "sys", text: frame.content }]);
+      else if (frame.type === "message") {
+        setFeed((f) => [...f, { kind: "msg", m: frame }]);
+        // A message means they stopped typing — clear it immediately.
+        setTyping((t) => { const { [frame.username]: _drop, ...rest } = t; return rest; });
+      } else if (frame.type === "system") setFeed((f) => [...f, { kind: "sys", text: frame.content }]);
       else if (frame.type === "presence") setUsers(frame.users);
+      else if (frame.type === "typing") setTyping((t) => ({ ...t, [frame.username]: Date.now() + 4000 }));
     };
     return () => ws.close();
   }, [phase, room?.slug]);
@@ -139,6 +145,15 @@ export default function Chat() {
       const t = Date.now();
       setNow(t);
       setFeed((f) => f.filter((it) => it.kind !== "msg" || new Date(it.m.expires_at).getTime() > t));
+      // Expire stale typing indicators (no ping in the last 4s).
+      setTyping((tm) => {
+        const next: Record<string, number> = {};
+        let changed = false;
+        for (const [u, exp] of Object.entries(tm)) {
+          if (exp > t) next[u] = exp; else changed = true;
+        }
+        return changed ? next : tm;
+      });
     }, 1000);
     return () => clearInterval(id);
   }, []);
@@ -150,8 +165,17 @@ export default function Chat() {
     const input = (e.currentTarget as HTMLFormElement).elements.namedItem("msg") as HTMLInputElement;
     const content = input.value.trim();
     if (!content || wsRef.current?.readyState !== WebSocket.OPEN) return;
-    wsRef.current.send(JSON.stringify({ content }));
+    wsRef.current.send(JSON.stringify({ type: "message", content }));
     input.value = "";
+  }
+
+  // Send a typing ping at most every ~1.8s while the user is actually typing.
+  function onType() {
+    const t = Date.now();
+    if (wsRef.current?.readyState === WebSocket.OPEN && t - lastTypingRef.current > 1800) {
+      lastTypingRef.current = t;
+      wsRef.current.send(JSON.stringify({ type: "typing" }));
+    }
   }
 
   if (phase === "loading")
@@ -175,6 +199,13 @@ export default function Chat() {
   const rows = buildRows(feed);
   const oldest = feed.find((it) => it.kind === "msg") as { kind: "msg"; m: ChatMessage } | undefined;
   const nextExpiryMs = oldest ? new Date(oldest.m.expires_at).getTime() - now : null;
+
+  const typingNames = Object.keys(typing).filter((u) => u !== user?.username && typing[u] > now);
+  const typingText =
+    typingNames.length === 1 ? `${typingNames[0]} is typing`
+    : typingNames.length === 2 ? `${typingNames[0]} and ${typingNames[1]} are typing`
+    : typingNames.length > 2 ? "Several people are typing"
+    : "";
 
   return (
     <div className="chat-page">
@@ -242,9 +273,18 @@ export default function Chat() {
         </aside>
       </div>
 
+      <div className="typing-row">
+        {typingText && (
+          <span className="typing-indicator">
+            {typingText}
+            <span className="dots"><i /><i /><i /></span>
+          </span>
+        )}
+      </div>
+
       <form className="composer" onSubmit={send}>
         <div className="composer-inner">
-          <input name="msg" placeholder="Type a message…" autoComplete="off" autoFocus aria-label="Message" />
+          <input name="msg" placeholder="Type a message…" autoComplete="off" autoFocus aria-label="Message" onChange={onType} />
           <button className="primary send-btn" type="submit" aria-label="Send"><Icon name="send" size={18} /></button>
         </div>
       </form>

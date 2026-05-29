@@ -262,7 +262,16 @@ select option { background: #12141c; }
 .presence li { display: flex; align-items: center; gap: 0.6rem; font-size: 0.9rem; font-weight: 600; padding: 0.35rem 0.4rem; border-radius: 10px; transition: background var(--t); }
 .presence li:hover { background: var(--glass); }
 
-.composer { padding: 0.85rem 1rem 1.1rem; }
+.typing-row { height: 1.1rem; padding: 0 1.4rem; }
+.typing-indicator { display: inline-flex; align-items: center; gap: 0.4rem; color: var(--muted); font-size: 0.78rem; font-style: italic; animation: fadein 0.2s var(--ease); }
+.typing-indicator .dots { display: inline-flex; gap: 3px; }
+.typing-indicator .dots i { width: 4px; height: 4px; border-radius: 50%; background: var(--muted); display: inline-block; animation: blink 1.2s infinite; }
+.typing-indicator .dots i:nth-child(2) { animation-delay: 0.2s; }
+.typing-indicator .dots i:nth-child(3) { animation-delay: 0.4s; }
+@keyframes blink { 0%, 60%, 100% { opacity: 0.25; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-2px); } }
+@keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+
+.composer { padding: 0.2rem 1rem 1.1rem; }
 .composer-inner {
   display: flex; gap: 0.5rem; align-items: center; padding: 0.35rem 0.35rem 0.35rem 0.5rem;
   background: var(--glass); border: 1px solid var(--hairline); border-radius: 999px;

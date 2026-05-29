@@ -259,6 +259,15 @@ async def chat(websocket: WebSocket, slug: str, token: str = Query(None)) -> Non
 
         while True:
             data = await websocket.receive_json()
+            kind = data.get("type", "message")
+
+            # Typing indicator: relay to everyone else; never persisted.
+            if kind == "typing":
+                await manager.broadcast(
+                    slug, {"type": "typing", "username": username}, exclude=websocket
+                )
+                continue
+
             content = str(data.get("content", "")).strip()[: settings.max_message_length]
             if not content:
                 continue
