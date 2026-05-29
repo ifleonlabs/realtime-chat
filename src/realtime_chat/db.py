@@ -58,22 +58,32 @@ def _migrate_sqlite(engine: Engine) -> None:
                 "ALTER TABLE room ADD COLUMN message_ttl_seconds INTEGER NOT NULL DEFAULT 86400"
             )
 
+        # The message table changed shape across versions:
+        #   v0.1.0: (room TEXT NOT NULL, username, content, created_at)
+        #   v0.2.0: room -> room_id + user_id foreign keys
+        #   v0.3.0: + expires_at
         message_cols = columns(conn, "message")
+
+        # A legacy v0.1.0 table still has the free-form `room` column, which is
+        # NOT NULL and indexed — so new inserts (which only set room_id) fail.
+        # Those rows reference room *names* that don't exist in the new model
+        # and can't be mapped, so rebuild the table cleanly. (Only triggers for
+        # v0.1.0-lineage databases; v0.2.0+ message tables keep their rows.)
+        if "room" in message_cols:
+            from .models import Message
+
+            conn.exec_driver_sql("DROP TABLE message")
+            Message.__table__.create(bind=conn, checkfirst=True)
+            message_cols = columns(conn, "message")
+
         if message_cols:
-            # The message table changed shape across versions:
-            #   v0.1.0: (room TEXT, username, content, created_at)
-            #   v0.2.0: room -> room_id + user_id foreign keys
-            #   v0.3.0: + expires_at
-            # Add any missing columns. Rows from before a column existed get
-            # NULL there (e.g. legacy messages have no room_id, so they simply
-            # never match a room and are effectively retired — not deleted).
+            # Otherwise just add any columns introduced after this DB was made.
             if "room_id" not in message_cols:
                 conn.exec_driver_sql("ALTER TABLE message ADD COLUMN room_id INTEGER")
             if "user_id" not in message_cols:
                 conn.exec_driver_sql("ALTER TABLE message ADD COLUMN user_id INTEGER")
             if "expires_at" not in message_cols:
                 conn.exec_driver_sql("ALTER TABLE message ADD COLUMN expires_at DATETIME")
-                # Backfill: keep recent messages for 24h from when they were sent.
                 conn.exec_driver_sql(
                     "UPDATE message SET expires_at = datetime(created_at, '+1 day') "
                     "WHERE expires_at IS NULL"
