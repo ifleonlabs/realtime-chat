@@ -1,0 +1,19 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Local configuration (commit .env.example instead)
+.env
+
+# Local databases
+*.db
+
+# Test / tooling caches
+.pytest_cache/
