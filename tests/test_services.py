@@ -7,7 +7,6 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from realtime_chat import messages, rooms, users
-from realtime_chat.models import Room
 from realtime_chat.rooms import RoomError
 from realtime_chat.schemas import RoomCreate, UserCreate
 from realtime_chat.users import AuthError
@@ -64,29 +63,20 @@ def test_public_room_join_without_code(session):
     assert rooms.member_count(session, room.id) == 2
 
 
-def test_lifetime_sets_expiry(session):
+def test_ttl_minutes_sets_message_ttl(session):
     alice = _user(session)
-    room_24 = rooms.create(session, alice, RoomCreate(name="day", lifetime="24h"))
-    assert room_24.expires_at is not None
-    room_never = rooms.create(session, alice, RoomCreate(name="forever", lifetime="never"))
-    assert room_never.expires_at is None
+    room_24 = rooms.create(session, alice, RoomCreate(name="day", ttl_minutes=1440))
+    assert room_24.message_ttl_seconds == 86_400
+    room_short = rooms.create(session, alice, RoomCreate(name="short", ttl_minutes=30))
+    assert room_short.message_ttl_seconds == 1800
 
 
-def test_is_expired_and_purge(session):
-    alice = _user(session)
-    room = rooms.create(session, alice, RoomCreate(name="temp", lifetime="1h"))
-    # Force it into the past.
-    room.expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
-    session.add(room)
-    session.commit()
-
-    assert rooms.is_expired(room)
-    removed = rooms.purge_expired(session)
-    assert room.slug in removed
-    assert rooms.get_by_slug(session, room.slug) is None
+def test_ttl_minutes_capped_at_24h():
+    with pytest.raises(Exception):  # pydantic validation (le=1440)
+        RoomCreate(name="too long", ttl_minutes=2000)
 
 
-def test_list_public_excludes_private_and_expired(session):
+def test_list_public_excludes_private(session):
     alice = _user(session)
     rooms.create(session, alice, RoomCreate(name="pub", is_private=False))
     rooms.create(session, alice, RoomCreate(name="priv", is_private=True))
@@ -97,17 +87,37 @@ def test_list_public_excludes_private_and_expired(session):
 def test_delete_room_cascades_messages(session):
     alice = _user(session)
     room = rooms.create(session, alice, RoomCreate(name="r"))
-    messages.save(session, room.id, alice.id, alice.username, "hi")
+    messages.save(session, room.id, alice.id, alice.username, "hi", room.message_ttl_seconds)
     rooms.delete_room(session, room)
     assert rooms.get_by_slug(session, room.slug) is None
     assert messages.recent(session, room.id, 10) == []
 
 
-# --- messages --------------------------------------------------------------
+# --- messages (rolling expiry) ---------------------------------------------
 def test_messages_recent_order_and_limit(session):
     alice = _user(session)
     room = rooms.create(session, alice, RoomCreate(name="r"))
     for i in range(5):
-        messages.save(session, room.id, alice.id, alice.username, f"m{i}")
+        messages.save(session, room.id, alice.id, alice.username, f"m{i}", 3600)
     recent = messages.recent(session, room.id, 3)
     assert [m.content for m in recent] == ["m2", "m3", "m4"]
+
+
+def test_recent_excludes_expired_messages(session):
+    alice = _user(session)
+    room = rooms.create(session, alice, RoomCreate(name="r"))
+    # An already-expired message (negative TTL) is hidden from history.
+    messages.save(session, room.id, alice.id, alice.username, "old", -10)
+    messages.save(session, room.id, alice.id, alice.username, "fresh", 3600)
+    assert [m.content for m in messages.recent(session, room.id, 10)] == ["fresh"]
+
+
+def test_purge_expired_messages(session):
+    alice = _user(session)
+    room = rooms.create(session, alice, RoomCreate(name="r"))
+    messages.save(session, room.id, alice.id, alice.username, "old", -10)
+    messages.save(session, room.id, alice.id, alice.username, "keep", 3600)
+    removed = messages.purge_expired(session)
+    assert removed == 1
+    # The fresh one survives.
+    assert [m.content for m in messages.recent(session, room.id, 10)] == ["keep"]

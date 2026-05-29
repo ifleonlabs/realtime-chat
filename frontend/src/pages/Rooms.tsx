@@ -2,17 +2,23 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api";
 import { useAuth } from "../auth";
-import type { Lifetime, Room } from "../types";
+import type { Room } from "../types";
 
-function expiryLabel(room: Room): string {
-  if (!room.expires_at) return "never expires";
-  const ms = new Date(room.expires_at).getTime() - Date.now();
-  if (ms <= 0) return "expired";
-  const hours = Math.floor(ms / 3_600_000);
-  if (hours >= 24) return `expires in ${Math.floor(hours / 24)}d`;
-  if (hours >= 1) return `expires in ${hours}h`;
-  return `expires in ${Math.max(1, Math.floor(ms / 60_000))}m`;
+function ttlLabel(room: Room): string {
+  const mins = Math.round(room.message_ttl_seconds / 60);
+  if (mins % 60 === 0) return `messages last ${mins / 60}h`;
+  return `messages last ${mins}m`;
 }
+
+// Preset message lifetimes (minutes). 24h is the hard maximum; "Custom" lets
+// the user enter any value up to 24h.
+const TTL_PRESETS = [
+  { label: "1 hour", minutes: 60 },
+  { label: "6 hours", minutes: 360 },
+  { label: "12 hours", minutes: 720 },
+  { label: "24 hours", minutes: 1440 },
+];
+const MAX_MINUTES = 1440;
 
 export default function Rooms() {
   const { user, logout } = useAuth();
@@ -25,7 +31,8 @@ export default function Rooms() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [isPrivate, setIsPrivate] = useState(false);
-  const [lifetime, setLifetime] = useState<Lifetime>("24h");
+  const [preset, setPreset] = useState<string>("1440"); // minutes, or "custom"
+  const [customHours, setCustomHours] = useState("2");
 
   async function refresh() {
     try {
@@ -41,11 +48,24 @@ export default function Rooms() {
     refresh();
   }, []);
 
+  function chosenTtlMinutes(): number {
+    if (preset === "custom") {
+      const hours = parseFloat(customHours) || 0;
+      return Math.min(MAX_MINUTES, Math.max(1, Math.round(hours * 60)));
+    }
+    return parseInt(preset, 10);
+  }
+
   async function createRoom(e: FormEvent) {
     e.preventDefault();
     setError(null);
     try {
-      const room = await api.createRoom({ name: name.trim(), description: description.trim(), is_private: isPrivate, lifetime });
+      const room = await api.createRoom({
+        name: name.trim(),
+        description: description.trim(),
+        is_private: isPrivate,
+        ttl_minutes: chosenTtlMinutes(),
+      });
       setName("");
       setDescription("");
       navigate(`/room/${room.slug}`);
@@ -87,18 +107,31 @@ export default function Rooms() {
             <h2>Create a room</h2>
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Room name" required maxLength={60} />
             <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Description (optional)" maxLength={200} />
+
+            <label className="field-label">Messages disappear after</label>
             <div className="form-row">
-              <label className="check">
-                <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} />
-                Private (join by code)
-              </label>
-              <select value={lifetime} onChange={(e) => setLifetime(e.target.value as Lifetime)}>
-                <option value="1h">Expires in 1 hour</option>
-                <option value="24h">Expires in 24 hours</option>
-                <option value="7d">Expires in 7 days</option>
-                <option value="never">Never expires</option>
+              <select value={preset} onChange={(e) => setPreset(e.target.value)}>
+                {TTL_PRESETS.map((p) => (
+                  <option key={p.minutes} value={String(p.minutes)}>{p.label}</option>
+                ))}
+                <option value="custom">Custom…</option>
               </select>
+              {preset === "custom" && (
+                <input
+                  type="number" min={0.1} max={24} step={0.5}
+                  value={customHours}
+                  onChange={(e) => setCustomHours(e.target.value)}
+                  placeholder="hours (max 24)"
+                  title="Hours, up to 24"
+                />
+              )}
             </div>
+
+            <label className="check">
+              <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} />
+              Private (join by code)
+            </label>
+
             <button className="primary" type="submit">Create &amp; open</button>
           </form>
 
@@ -116,7 +149,7 @@ export default function Rooms() {
                         {room.is_owner && <span className="tag">owner</span>}
                       </div>
                       <div className="room-meta">
-                        {room.member_count} member{room.member_count === 1 ? "" : "s"} · {expiryLabel(room)}
+                        {room.member_count} member{room.member_count === 1 ? "" : "s"} · {ttlLabel(room)}
                       </div>
                       {room.join_code && (
                         <div className="code">code: <code>{room.join_code}</code></div>
@@ -145,7 +178,7 @@ export default function Rooms() {
                     <div className="room-name"># {room.name}</div>
                     {room.description && <div className="room-desc">{room.description}</div>}
                     <div className="room-meta">
-                      by @{room.owner_username} · {room.member_count} member{room.member_count === 1 ? "" : "s"} · {expiryLabel(room)}
+                      by @{room.owner_username} · {room.member_count} member{room.member_count === 1 ? "" : "s"} · {ttlLabel(room)}
                     </div>
                   </div>
                   <div className="room-actions">

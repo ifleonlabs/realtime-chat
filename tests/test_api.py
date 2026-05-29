@@ -41,9 +41,23 @@ def test_create_and_list_public_room(client, auth):
     room = res.json()
     assert room["is_owner"] and room["is_member"] and room["member_count"] == 1
     assert room["join_code"] is None  # public rooms have no code
+    assert room["message_ttl_seconds"] == 86_400  # defaults to 24h
 
     listed = client.get("/api/rooms", headers=headers).json()
     assert any(r["slug"] == room["slug"] for r in listed)
+
+
+def test_create_room_custom_ttl(client, auth):
+    headers = auth("alice")
+    res = client.post("/api/rooms", json={"name": "Short", "ttl_minutes": 90}, headers=headers)
+    assert res.status_code == 201
+    assert res.json()["message_ttl_seconds"] == 90 * 60
+
+
+def test_ttl_cannot_exceed_24h(client, auth):
+    headers = auth("alice")
+    res = client.post("/api/rooms", json={"name": "TooLong", "ttl_minutes": 5000}, headers=headers)
+    assert res.status_code == 422
 
 
 def test_private_room_owner_sees_code_others_dont(client, auth):

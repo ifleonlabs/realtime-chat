@@ -29,8 +29,9 @@ class Room(SQLModel, table=True):
     # Required to join a private room; empty for public rooms.
     join_code: str = ""
     created_at: datetime = Field(default_factory=utcnow)
-    # None means the room never expires.
-    expires_at: Optional[datetime] = None
+    # Rolling message expiry: every message in this room is deleted this many
+    # seconds after it is posted (max 24h). The room itself persists.
+    message_ttl_seconds: int = 86_400
 
 
 class RoomMembership(SQLModel, table=True):
@@ -47,3 +48,5 @@ class Message(SQLModel, table=True):
     username: str  # denormalized for easy display
     content: str
     created_at: datetime = Field(default_factory=utcnow)
+    # When this message rolls off and is deleted (created_at + room TTL).
+    expires_at: datetime = Field(default_factory=utcnow, index=True)

@@ -6,18 +6,20 @@ import type { ChatMessage, Frame, Room } from "../types";
 
 type FeedItem = { kind: "msg"; m: ChatMessage } | { kind: "sys"; text: string };
 
-function countdown(expires: string | null, now: number): string | null {
-  if (!expires) return null;
-  const ms = new Date(expires).getTime() - now;
-  if (ms <= 0) return "expired";
+function formatRemaining(ms: number): string {
+  if (ms <= 0) return "0s";
   const s = Math.floor(ms / 1000);
-  const d = Math.floor(s / 86400);
-  const h = Math.floor((s % 86400) / 3600);
+  const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
   const sec = s % 60;
-  if (d > 0) return `${d}d ${h}h`;
   if (h > 0) return `${h}h ${m}m`;
-  return `${m}m ${sec}s`;
+  if (m > 0) return `${m}m ${sec}s`;
+  return `${sec}s`;
+}
+
+function ttlLabel(seconds: number): string {
+  const mins = Math.round(seconds / 60);
+  return mins % 60 === 0 ? `${mins / 60}h` : `${mins}m`;
 }
 
 export default function Chat() {
@@ -91,9 +93,16 @@ export default function Chat() {
     return () => ws.close();
   }, [phase, room?.slug]);
 
-  // Tick the expiry countdown.
+  // Every second: advance the clock AND drop messages that have rolled off,
+  // so they visibly disappear one by one (oldest first).
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000);
+    const id = setInterval(() => {
+      const t = Date.now();
+      setNow(t);
+      setFeed((f) =>
+        f.filter((item) => item.kind !== "msg" || new Date(item.m.expires_at).getTime() > t)
+      );
+    }, 1000);
     return () => clearInterval(id);
   }, []);
 
@@ -128,7 +137,9 @@ export default function Chat() {
     );
   }
 
-  const remaining = room ? countdown(room.expires_at, now) : null;
+  // The next message to vanish is the oldest one still on screen.
+  const oldest = feed.find((item) => item.kind === "msg") as { kind: "msg"; m: ChatMessage } | undefined;
+  const nextExpiryMs = oldest ? new Date(oldest.m.expires_at).getTime() - now : null;
 
   return (
     <div className="chat-page">
@@ -139,7 +150,13 @@ export default function Chat() {
         </span>
         <span className={connected ? "status live" : "status"}>{connected ? "live" : "connecting…"}</span>
         <span className="spacer" />
-        {remaining && <span className={remaining === "expired" ? "pill danger" : "pill"}>⏳ {remaining}</span>}
+        {nextExpiryMs !== null ? (
+          <span className={nextExpiryMs < 60_000 ? "pill danger" : "pill"} title="Time until the oldest message disappears">
+            ⏳ next message in {formatRemaining(nextExpiryMs)}
+          </span>
+        ) : (
+          room && <span className="pill" title="How long messages live in this room">⏳ messages last {ttlLabel(room.message_ttl_seconds)}</span>
+        )}
       </header>
 
       {room?.join_code && (

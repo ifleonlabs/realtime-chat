@@ -29,11 +29,9 @@ class Settings(BaseSettings):
     history_limit: int = 50
     max_message_length: int = 2000
 
-    # --- rooms ------------------------------------------------------------
-    # Default lifetime for a new room, in hours (clients may pick others).
-    default_room_lifetime_hours: int = 24
-    # How often the background task purges expired rooms, in seconds.
-    cleanup_interval_seconds: int = 300
+    # --- expiry -----------------------------------------------------------
+    # How often the background task deletes expired messages, in seconds.
+    cleanup_interval_seconds: int = 60
 
     @property
     def is_using_default_secret(self) -> bool:

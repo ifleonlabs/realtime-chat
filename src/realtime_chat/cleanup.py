@@ -1,7 +1,8 @@
-"""Background task that periodically deletes expired rooms.
+"""Background task that periodically deletes expired messages.
 
-Started from the app's lifespan. On each tick it purges expired rooms from the
-database and closes any still-connected WebSocket clients in those rooms.
+Started from the app's lifespan. Clients also hide messages locally the moment
+they pass their expiry, so the chat looks like messages roll off one by one;
+this task is what actually reclaims the rows in the database.
 """
 
 from __future__ import annotations
@@ -11,36 +12,31 @@ import logging
 
 from sqlmodel import Session
 
-from . import rooms
+from . import messages
 from .config import get_settings
 from .db import get_engine
-from .manager import ConnectionManager
 
 log = logging.getLogger("realtime_chat.cleanup")
 
 
-async def purge_once(manager: ConnectionManager) -> list[str]:
-    """Purge expired rooms once; disconnect their clients. Returns slugs purged."""
+def purge_once() -> int:
+    """Delete expired messages once. Returns how many were removed."""
     with Session(get_engine()) as session:
-        removed = rooms.purge_expired(session)
-    for slug in removed:
-        await manager.close_room(
-            slug, {"type": "system", "content": "This room has expired and is now closed."}
-        )
+        removed = messages.purge_expired(session)
     if removed:
-        log.info("Purged %d expired room(s): %s", len(removed), ", ".join(removed))
+        log.info("Purged %d expired message(s)", removed)
     return removed
 
 
-async def run_cleanup_loop(manager: ConnectionManager) -> None:
+async def run_cleanup_loop() -> None:
     """Run purge_once forever on the configured interval (cancel-safe)."""
     interval = get_settings().cleanup_interval_seconds
     try:
         while True:
             await asyncio.sleep(interval)
             try:
-                await purge_once(manager)
+                purge_once()
             except Exception:  # never let one bad tick kill the loop
-                log.exception("Room cleanup tick failed")
+                log.exception("Message cleanup tick failed")
     except asyncio.CancelledError:
         pass

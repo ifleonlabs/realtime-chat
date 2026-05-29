@@ -9,6 +9,7 @@ from rich.console import Console
 from rich.table import Table
 from sqlmodel import Session, select
 
+from . import messages as messages_service
 from . import rooms as rooms_service
 from .config import get_settings
 from .db import get_engine, init_db
@@ -63,7 +64,7 @@ def users() -> None:
 
 @app.command()
 def rooms() -> None:
-    """List all rooms with owner, members, visibility, and expiry."""
+    """List all rooms with owner, members, visibility, and message lifetime."""
     init_db()
     with Session(get_engine()) as session:
         rows = session.exec(select(Room).order_by(Room.created_at.desc())).all()
@@ -75,30 +76,29 @@ def rooms() -> None:
         table.add_column("Name")
         table.add_column("Visibility")
         table.add_column("Members", justify="right")
-        table.add_column("Expires")
+        table.add_column("Msg lifetime")
         for r in rows:
-            expires = "never" if r.expires_at is None else r.expires_at.strftime("%Y-%m-%d %H:%M")
-            if rooms_service.is_expired(r):
-                expires = f"[red]{expires} (expired)[/red]"
+            mins = r.message_ttl_seconds // 60
+            ttl = f"{mins // 60}h" if mins % 60 == 0 else f"{mins}m"
             table.add_row(
                 r.slug, r.name,
                 "private" if r.is_private else "public",
                 str(rooms_service.member_count(session, r.id)),
-                expires,
+                ttl,
             )
     console.print(table)
 
 
 @app.command()
 def purge() -> None:
-    """Delete expired rooms now (normally done automatically in the background)."""
+    """Delete expired messages now (normally done automatically in the background)."""
     init_db()
     with Session(get_engine()) as session:
-        removed = rooms_service.purge_expired(session)
+        removed = messages_service.purge_expired(session)
     if removed:
-        console.print(f"[green]Purged {len(removed)} expired room(s):[/green] {', '.join(removed)}")
+        console.print(f"[green]Purged {removed} expired message(s).[/green]")
     else:
-        console.print("[dim]No expired rooms.[/dim]")
+        console.print("[dim]No expired messages.[/dim]")
 
 
 if __name__ == "__main__":

@@ -43,7 +43,7 @@ from ..schemas import (
     Token,
     UserCreate,
     UserRead,
-)
+)  # noqa: F401
 from ..security import create_access_token
 from ..users import AuthError
 
@@ -58,7 +58,7 @@ async def lifespan(app: FastAPI):
     init_db()
     if get_settings().is_using_default_secret:
         log.warning("CHAT_JWT_SECRET is the insecure default; set it in production.")
-    task = asyncio.create_task(run_cleanup_loop(manager))
+    task = asyncio.create_task(run_cleanup_loop())
     try:
         yield
     finally:
@@ -88,7 +88,7 @@ def _room_read(session: Session, room: Room, user: User) -> RoomRead:
         owner_username=owner.username if owner else "?",
         member_count=rooms.member_count(session, room.id),
         created_at=_aware(room.created_at),
-        expires_at=_aware(room.expires_at),
+        message_ttl_seconds=room.message_ttl_seconds,
         is_owner=is_owner,
         is_member=is_owner or rooms.is_member(session, user.id, room.id),
         join_code=room.join_code if (is_owner and room.is_private) else None,
@@ -163,7 +163,7 @@ def list_my_rooms(
 def _get_visible_room(session: Session, slug: str, user: User) -> Room:
     """Fetch a room the user is allowed to see, else 404 (hides private rooms)."""
     room = rooms.get_by_slug(session, slug)
-    if room is None or rooms.is_expired(room):
+    if room is None:
         raise HTTPException(status_code=404, detail="Room not found.")
     if room.is_private and not rooms.has_access(session, user, room):
         raise HTTPException(status_code=404, detail="Room not found.")
@@ -187,7 +187,7 @@ def join_room(
     session: Session = Depends(get_session),
 ) -> RoomRead:
     room = rooms.get_by_slug(session, slug)
-    if room is None or rooms.is_expired(room):
+    if room is None:
         raise HTTPException(status_code=404, detail="Room not found.")
     try:
         rooms.join(session, user, room, code=body.code)
@@ -239,13 +239,14 @@ async def chat(websocket: WebSocket, slug: str, token: str = Query(None)) -> Non
             await websocket.close(code=4401)  # unauthorized
             return
         room = rooms.get_by_slug(session, slug)
-        if room is None or rooms.is_expired(room):
+        if room is None:
             await websocket.close(code=4404)  # gone
             return
         if not rooms.has_access(session, user, room):
             await websocket.close(code=4403)  # forbidden
             return
         room_id = room.id
+        ttl_seconds = room.message_ttl_seconds
         user_id = user.id
         username = user.username
         history = [messages.payload(m) for m in messages.recent(session, room_id, settings.history_limit)]
@@ -262,7 +263,7 @@ async def chat(websocket: WebSocket, slug: str, token: str = Query(None)) -> Non
             if not content:
                 continue
             with Session(get_engine()) as session:
-                message = messages.save(session, room_id, user_id, username, content)
+                message = messages.save(session, room_id, user_id, username, content, ttl_seconds)
             await manager.broadcast(slug, messages.payload(message))
     except WebSocketDisconnect:
         pass

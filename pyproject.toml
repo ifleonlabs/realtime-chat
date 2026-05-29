@@ -1,7 +1,7 @@
 [project]
 name = "realtime-chat"
-version = "0.2.0"
-description = "A full-stack chat app: accounts, user-created public/private rooms with auto-expiry, and real-time WebSocket messaging (FastAPI + React)."
+version = "0.3.0"
+description = "A full-stack chat app: accounts, user-created public/private rooms, ephemeral rolling messages (each lives up to 24h), and real-time WebSocket messaging (FastAPI + React)."
 readme = "README.md"
 authors = [
     { name = "mahiprime2001", email = "tarunmatta5669@gmail.com" }

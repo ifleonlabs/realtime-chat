@@ -1,16 +1,17 @@
 # realtime-chat
 
-A full-stack real-time chat app: **accounts**, **user-created rooms** (public or private), **auto-expiring rooms**, and live **WebSocket** messaging with presence. Built with a **FastAPI** backend ([SQLModel](https://sqlmodel.tiangolo.com/) + JWT auth) and a **React + TypeScript** frontend ([Vite](https://vitejs.dev/)).
+A full-stack real-time chat app: **accounts**, **user-created rooms** (public or private), **ephemeral rolling messages**, and live **WebSocket** messaging with presence. Built with a **FastAPI** backend ([SQLModel](https://sqlmodel.tiangolo.com/) + JWT auth) and a **React + TypeScript** frontend ([Vite](https://vitejs.dev/)).
 
-This is project #5 in a series of Python projects. **v0.2.0** grows the original WebSocket chat server into a complete product with auth, room management, and a real frontend.
+This is project #5 in a series of Python projects. **v0.3.0** makes messages ephemeral: the room stays open and each message rolls off on its own timer.
 
 ## Features
 
 - **Accounts** — register / log in; passwords hashed with bcrypt, sessions via JWT
 - **Rooms you create** — give them a name + description
 - **Public or private** — public rooms are listed for everyone; private rooms are hidden and require a **join code**
-- **Auto-expiry** — pick a room lifetime (1 hour / 24 hours / 7 days / never); a background task deletes expired rooms and disconnects their clients
-- **Real-time** — instant messaging over WebSockets, with **live presence** (who's online) and **history** replayed on join
+- **Ephemeral rolling messages** — each message lives for the room's chosen lifetime (presets up to **24 hours**, or a **custom** time; 24h is the hard maximum) and then disappears **one by one**, oldest first. The room itself keeps running. A background task deletes expired messages; the UI hides them the moment they expire.
+- **Live timer at the top** of each room counts down to when the next (oldest) message will vanish.
+- **Real-time** — instant messaging over WebSockets, with **live presence** (who's online) and recent (non-expired) **history** replayed on join
 - **A polished React UI** plus a Typer CLI for administration
 
 ## What this version demonstrates
@@ -74,8 +75,8 @@ Interactive API docs: <http://127.0.0.1:8000/docs>.
 ```bash
 chat serve            # run the server
 chat users            # list registered users
-chat rooms            # list rooms (visibility, members, expiry)
-chat purge            # delete expired rooms now
+chat rooms            # list rooms (visibility, members, message lifetime)
+chat purge            # delete expired messages now
 ```
 
 ## Project layout
@@ -91,7 +92,7 @@ realtime-chat/
 │   ├── users.py  rooms.py  messages.py   # service layer
 │   ├── deps.py                   # auth dependencies (HTTP + WebSocket)
 │   ├── manager.py                # in-memory connection/broadcast layer
-│   ├── cleanup.py                # background expiry task
+│   ├── cleanup.py                # background task: delete expired messages
 │   ├── cli.py
 │   └── web/app.py                # API + WebSocket + serves the built SPA
 ├── frontend/                     # Vite + React + TypeScript
@@ -103,7 +104,7 @@ realtime-chat/
 ## Development
 
 ```bash
-uv run pytest                 # backend tests (32)
+uv run pytest                 # backend tests (36)
 cd frontend && npm run build  # verify the frontend compiles
 ```
 

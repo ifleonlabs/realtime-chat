@@ -19,19 +19,17 @@ export interface Room {
   owner_username: string;
   member_count: number;
   created_at: string;
-  expires_at: string | null;
+  message_ttl_seconds: number;
   is_owner: boolean;
   is_member: boolean;
   join_code: string | null;
 }
 
-export type Lifetime = "1h" | "24h" | "7d" | "never";
-
 export interface CreateRoomInput {
   name: string;
   description?: string;
   is_private: boolean;
-  lifetime: Lifetime;
+  ttl_minutes: number;
 }
 
 export interface ChatMessage {
@@ -39,10 +37,11 @@ export interface ChatMessage {
   username: string;
   content: string;
   created_at: string;
+  expires_at: string;
 }
 
 export type Frame =
   | { type: "history"; messages: ChatMessage[] }
-  | { type: "message"; username: string; content: string; created_at: string }
+  | { type: "message"; username: string; content: string; created_at: string; expires_at: string }
   | { type: "system"; content: string }
   | { type: "presence"; users: string[]; count: number };
