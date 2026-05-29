@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useAuth } from "../auth";
 import { ApiError } from "../api";
+import { Icon } from "../components/Icon";
 
 export default function Login() {
   const { login, register } = useAuth();
@@ -27,7 +28,8 @@ export default function Login() {
   return (
     <div className="center">
       <form className="card auth-card" onSubmit={submit}>
-        <h1 className="brand">💬 realtime-chat</h1>
+        <h1 className="brand"><Icon name="message" size={26} /> realtime-chat</h1>
+        <p className="subtitle">Sign in to create rooms and chat in real time</p>
         <div className="tabs">
           <button type="button" className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>
             Log in

@@ -2,9 +2,20 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, ApiError, tokenStore } from "../api";
 import { useAuth } from "../auth";
+import { Icon } from "../components/Icon";
 import type { ChatMessage, Frame, Room } from "../types";
 
 type FeedItem = { kind: "msg"; m: ChatMessage } | { kind: "sys"; text: string };
+
+const AVATAR_COLORS = ["#2563eb", "#6366f1", "#10b981", "#f59e0b", "#ec4899", "#06b6d4", "#8b5cf6", "#ef4444"];
+function avatarColor(name: string): string {
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return AVATAR_COLORS[h % AVATAR_COLORS.length];
+}
+function initials(name: string): string {
+  return name.slice(0, 2).toUpperCase();
+}
 
 function formatRemaining(ms: number): string {
   if (ms <= 0) return "0s";
@@ -120,14 +131,14 @@ export default function Chat() {
     input.value = "";
   }
 
-  if (phase === "loading") return <div className="center muted">Joining room…</div>;
+  if (phase === "loading") return <div className="center muted"><Icon name="clock" size={18} /> &nbsp;Joining room…</div>;
 
   if (phase === "needcode") {
     return (
       <div className="center">
         <form className="card auth-card" onSubmit={submitCode}>
-          <h2>🔒 Private room</h2>
-          <p className="muted">Enter the room's join code to continue.</p>
+          <h2 className="brand"><Icon name="lock" size={20} /> Private room</h2>
+          <p className="subtitle">Enter the room's join code to continue.</p>
           <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="join code" autoFocus />
           {errMsg && <p className="error">{errMsg}</p>}
           <button className="primary" type="submit">Join</button>
@@ -144,18 +155,18 @@ export default function Chat() {
   return (
     <div className="chat-page">
       <header className="topbar">
-        <button className="ghost" onClick={() => navigate("/")}>← Rooms</button>
+        <button className="ghost icon-only" title="Back to rooms" onClick={() => navigate("/")}><Icon name="back" size={18} /></button>
         <span className="brand-sm">
-          {room?.is_private ? "🔒 " : "# "}{room?.name}
+          <Icon name={room?.is_private ? "lock" : "hash"} size={18} />{room?.name}
         </span>
         <span className={connected ? "status live" : "status"}>{connected ? "live" : "connecting…"}</span>
         <span className="spacer" />
         {nextExpiryMs !== null ? (
           <span className={nextExpiryMs < 60_000 ? "pill danger" : "pill"} title="Time until the oldest message disappears">
-            ⏳ next message in {formatRemaining(nextExpiryMs)}
+            <Icon name="clock" size={14} /> next message in {formatRemaining(nextExpiryMs)}
           </span>
         ) : (
-          room && <span className="pill" title="How long messages live in this room">⏳ messages last {ttlLabel(room.message_ttl_seconds)}</span>
+          room && <span className="pill" title="How long messages live in this room"><Icon name="clock" size={14} /> messages last {ttlLabel(room.message_ttl_seconds)}</span>
         )}
       </header>
 
@@ -167,18 +178,26 @@ export default function Chat() {
 
       <div className="chat-body">
         <main className="messages">
+          {feed.length === 0 && (
+            <p className="empty-hint">No messages yet — say hello! Messages disappear after {room ? ttlLabel(room.message_ttl_seconds) : ""}.</p>
+          )}
           {feed.map((item, i) =>
             item.kind === "sys" ? (
               <div className="system" key={i}>{item.text}</div>
             ) : (
-              <div className={"msg" + (item.m.username === user?.username ? " me" : "")} key={i}>
-                <div className="who">
-                  {item.m.username}
-                  <span className="time">
-                    {new Date(item.m.created_at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
-                  </span>
+              <div className={"msg-row" + (item.m.username === user?.username ? " me" : "")} key={i}>
+                <div className="avatar" style={{ background: avatarColor(item.m.username) }}>
+                  {initials(item.m.username)}
                 </div>
-                <div className="text">{item.m.content}</div>
+                <div className="bubble">
+                  <div className="who">
+                    {item.m.username}
+                    <span className="time">
+                      {new Date(item.m.created_at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                  </div>
+                  <div className="text">{item.m.content}</div>
+                </div>
               </div>
             )
           )}
@@ -189,15 +208,20 @@ export default function Chat() {
           <h3>Online · {users.length}</h3>
           <ul>
             {users.map((u) => (
-              <li key={u}>{u}</li>
+              <li key={u}>
+                <span className="avatar" style={{ width: 24, height: 24, fontSize: "0.6rem", background: avatarColor(u) }}>
+                  {initials(u)}
+                </span>
+                {u}
+              </li>
             ))}
           </ul>
         </aside>
       </div>
 
       <form className="message-form" onSubmit={send}>
-        <input name="msg" placeholder="Type a message…" autoComplete="off" autoFocus />
-        <button className="primary" type="submit">Send</button>
+        <input name="msg" placeholder="Type a message…" autoComplete="off" autoFocus aria-label="Message" />
+        <button className="primary" type="submit"><Icon name="send" size={16} /> Send</button>
       </form>
     </div>
   );

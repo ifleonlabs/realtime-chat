@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api";
 import { useAuth } from "../auth";
+import { Icon } from "../components/Icon";
 import type { Room } from "../types";
 
 function ttlLabel(room: Room): string {
@@ -95,10 +96,10 @@ export default function Rooms() {
   return (
     <div className="page">
       <header className="topbar">
-        <span className="brand-sm">💬 realtime-chat</span>
+        <span className="brand-sm"><Icon name="message" size={22} /> realtime-chat</span>
         <span className="spacer" />
         <span className="muted">@{user?.username}</span>
-        <button className="ghost" onClick={logout}>Log out</button>
+        <button className="ghost" onClick={logout}><Icon name="logout" size={16} /> Log out</button>
       </header>
 
       <main className="rooms-layout">
@@ -132,7 +133,7 @@ export default function Rooms() {
               Private (join by code)
             </label>
 
-            <button className="primary" type="submit">Create &amp; open</button>
+            <button className="primary" type="submit"><Icon name="plus" size={16} /> Create &amp; open</button>
           </form>
 
           {error && <p className="error">{error}</p>}
@@ -145,7 +146,7 @@ export default function Rooms() {
                   <div className="card room" key={room.slug}>
                     <div className="room-main">
                       <div className="room-name">
-                        {room.is_private ? "🔒 " : "# "}{room.name}
+                        <Icon name={room.is_private ? "lock" : "hash"} size={16} />{room.name}
                         {room.is_owner && <span className="tag">owner</span>}
                       </div>
                       <div className="room-meta">
@@ -157,7 +158,7 @@ export default function Rooms() {
                     </div>
                     <div className="room-actions">
                       <button className="primary" onClick={() => navigate(`/room/${room.slug}`)}>Open</button>
-                      {room.is_owner && <button className="ghost danger" onClick={() => remove(room)}>Delete</button>}
+                      {room.is_owner && <button className="ghost danger icon-only" title="Delete room" onClick={() => remove(room)}><Icon name="trash" size={16} /></button>}
                     </div>
                   </div>
                 ))}
@@ -175,7 +176,7 @@ export default function Rooms() {
               {browseable.map((room) => (
                 <div className="card room" key={room.slug}>
                   <div className="room-main">
-                    <div className="room-name"># {room.name}</div>
+                    <div className="room-name"><Icon name="hash" size={16} />{room.name}</div>
                     {room.description && <div className="room-desc">{room.description}</div>}
                     <div className="room-meta">
                       by @{room.owner_username} · {room.member_count} member{room.member_count === 1 ? "" : "s"} · {ttlLabel(room)}
