@@ -1,0 +1,17 @@
+.git
+.github
+.venv
+**/__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+*.db
+*.db-wal
+*.db-shm
+.env
+frontend/node_modules
+frontend/dist
+tests
+# NOTE: README.md is intentionally NOT ignored — uv/hatchling needs it to build.
+DESIGN.md
+SECURITY.md
